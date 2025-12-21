@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Scout | Professional Lead Intelligence</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        brand: {
+                            blue: '#2563EB',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Oswald:wght@500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --brand-blue: #2563EB;
+            --page-bg: #F8FAFC;
+            --card-surface: #FFFFFF;
+            --well-surface: #F1F5F9;
+            --border-color: #E2E8F0;
+            --text-main: #0F172A;
+            --text-label: #475569;
+            --text-muted: #64748B;
+            --shadow-soft: 0 10px 25px -5px rgba(15, 23, 42, 0.04), 0 8px 10px -6px rgba(15, 23, 42, 0.04);
+        }
+
+        .dark {
+            --brand-blue: #3B82F6;
+            --page-bg: #0B1222;
+            --card-surface: #1E293B;
+            --well-surface: #334155;
+            --border-color: #334155;
+            --text-main: #F8FAFC;
+            --text-label: #CBD5E1;
+            --text-muted: #94A3B8;
+            --shadow-soft: 0 20px 25px -5px rgba(0, 0, 0, 0.3);
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--page-bg);
+            color: var(--text-main);
+            -webkit-font-smoothing: antialiased;
+            transition: background-color 0.3s ease, color 0.3s ease;
+        }
+
+        h1, h2, h3, .brand-font {
+            font-family: 'Oswald', sans-serif;
+            text-transform: uppercase;
+            letter-spacing: -0.01em;
+        }
+
+        .crm-card {
+            background: var(--card-surface);
+            border: 1px solid var(--border-color);
+            box-shadow: var(--shadow-soft);
+            transition: all 0.2s ease;
+        }
+
+        .crm-card:hover {
+            border-color: var(--brand-blue);
+            box-shadow: 0 20px 25px -5px rgba(15, 23, 42, 0.08);
+        }
+
+        .well {
+            background-color: var(--well-surface);
+            border: 1px solid var(--border-color);
+        }
+
+        .animate-fade-in {
+            animation: fadeIn 0.3s ease-out;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(4px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .label-caps {
+            font-size: 10px;
+            font-weight: 800;
+            text-transform: uppercase;
+            letter-spacing: 0.15em;
+            color: var(--text-label);
+        }
+
+        /* Override some Tailwind classes to use variables for theme compatibility */
+        .theme-bg-page { background-color: var(--page-bg); }
+        .theme-bg-card { background-color: var(--card-surface); }
+        .theme-text-main { color: var(--text-main); }
+        .theme-border { border-color: var(--border-color); }
+
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: var(--page-bg);
+        }
+        ::-webkit-scrollbar-thumb {
+            background: var(--border-color);
+            border-radius: 10px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: var(--text-muted);
+        }
+    </style>
+<script type="importmap">
+{
+  "imports": {
+    "react/": "https://esm.sh/react@^19.2.3/",
+    "react": "https://esm.sh/react@^19.2.3",
+    "@google/genai": "https://esm.sh/@google/genai@^1.34.0",
+    "recharts": "https://esm.sh/recharts@^3.6.0",
+    "react-dom/": "https://esm.sh/react-dom@^19.2.3/"
+  }
+}
+</script>
+</head>
+<body>
+    <div id="root"></div>
+</body>
+</html>
