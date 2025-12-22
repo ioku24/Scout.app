@@ -2,7 +2,7 @@
 import { GoogleGenAI, Type, Modality } from "@google/genai";
 
 // Initialize AI directly with the environment key
-const getAI = () => new GoogleGenAI({ apiKey: process.env.API_KEY });
+const getAI = () => new GoogleGenAI({ apiKey: import.meta.env.VITE_API_KEY });
 
 /**
  * Performs a deep signal search for recent business activity using Google Search grounding.
