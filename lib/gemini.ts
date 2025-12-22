@@ -43,7 +43,7 @@ export const discoverProspects = async (
   const ai = getAI();
   const model = depth === 'DEEP' ? 'gemini-3-pro-preview' : 'gemini-3-flash-preview';
   
-  const prompt = `Find 6 business prospects in ${location} within ${radius} miles that match this profile: "${description}".
+  const prompt = `Find business prospects in ${location} within ${radius} miles that match this profile: "${description}".
   User Context: ${context.role} looking for ${context.targetGoal}.
   
   Requirements:
