@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { AppState, Sponsor, Deal, PipelineStage, DiscoveredLead, DiscoverySession, AgentTask, AutomationSettings, Workflow, SocialMessage, SocialAccount, SenderProfile, ForensicDossier } from './types.ts';
+import { AppState, Sponsor, Deal, PipelineStage, DiscoveredLead, DiscoverySession, AgentTask, AutomationSettings, Workflow, SocialMessage, SocialAccount, SenderProfile, ForensicDossier, Persona } from './types.ts';
 import Dashboard from './components/Dashboard.tsx';
 import PipelineBoard from './components/PipelineBoard.tsx';
 import DiscoveryTab from './components/DiscoveryTab.tsx';
@@ -8,14 +8,22 @@ import SponsorForm from './components/SponsorForm.tsx';
 import DealDetail from './components/DealDetail.tsx';
 import WorkflowBuilder from './components/WorkflowBuilder.tsx';
 import SocialInbox from './components/SocialInbox.tsx';
-import { discoverProspects, discoverProspectsDeepScan, getIdentityKeys } from './lib/gemini.ts';
+import { discoverProspects, getIdentityKeys } from './lib/gemini.ts';
 
-const STORAGE_KEY = 'scout_crm_v4_final_auto_v5';
-const CURRENT_STATE_VERSION = 1;
+const STORAGE_KEY = 'scout_crm_v5_persistent_logic';
+const CURRENT_STATE_VERSION = 2;
 
 const migrateState = (payload: any): AppState => {
   if (!payload || !payload.stateVersion) return payload;
-  return payload.state;
+  const oldState = payload.state;
+  return {
+    ...oldState,
+    personas: oldState.personas || [],
+    automationSettings: {
+      ...oldState.automationSettings,
+      apolloApiKey: oldState.automationSettings?.apolloApiKey || ''
+    }
+  };
 };
 
 const App: React.FC = () => {
@@ -52,23 +60,18 @@ const App: React.FC = () => {
         },
         automationSettings: {
           n8nWebhookUrl: '',
+          apolloApiKey: '',
           autoSignalRefresh: false,
           notifyOnDeploy: true,
           agentFrequency: 'DAILY'
         },
+        personas: [],
         theme: 'light'
       };
     }
 
     return {
       ...baseState,
-      senderProfile: baseState.senderProfile || {
-        orgName: "My organization",
-        role: "",
-        goal: "looking to connect with high-fit partners",
-        offerOneLiner: "we offer a mutually beneficial partnership",
-        ctaStyle: "quick_chat"
-      },
       activeTask: { status: 'IDLE', phase: '' }
     } as AppState;
   });
@@ -78,7 +81,6 @@ const App: React.FC = () => {
   const [selectedDealId, setSelectedDealId] = useState<string | null>(null);
   const [isFocusMode, setIsFocusMode] = useState(false);
   const [notification, setNotification] = useState<string | null>(null);
-  const [recentlyAddedDealId, setRecentlyAddedDealId] = useState<string | null>(null);
 
   useEffect(() => {
     const { activeTask, ...persistentState } = state;
@@ -117,34 +119,20 @@ const App: React.FC = () => {
   }, [state.sponsors, state.vault]);
 
   const startDiscoveryAgent = useCallback(async (description: string, location: string, radius: string, depth: 'STANDARD' | 'DEEP', coords?: {latitude: number, longitude: number}) => {
-    setState(prev => ({
-      ...prev,
-      activeTask: {
-        status: 'SEARCHING',
-        phase: depth === 'DEEP' ? 'Deep Scan: Initializing Gemini + Apollo.io...' : 'Initializing Agent...',
-        query: description,
-        location
-      }
+    setState(prev => ({ 
+      ...prev, 
+      activeTask: { status: 'SEARCHING', phase: 'Initializing Agent...', query: description, location } 
     }));
 
     try {
-      // Choose between Standard Scan (Gemini only) or Deep Scan (Gemini + Apollo)
-      const results = depth === 'DEEP'
-        ? await discoverProspectsDeepScan(
-            description,
-            location,
-            { whoWeAre: state.senderProfile.orgName, role: state.senderProfile.role || 'Agent', targetGoal: state.senderProfile.goal },
-            radius,
-            coords
-          )
-        : await discoverProspects(
-            description,
-            location,
-            { whoWeAre: state.senderProfile.orgName, role: state.senderProfile.role || 'Agent', targetGoal: state.senderProfile.goal },
-            radius,
-            depth,
-            coords
-          );
+      const results = await discoverProspects(
+        description, 
+        location, 
+        { whoWeAre: state.senderProfile.orgName, role: state.senderProfile.role || 'Agent', targetGoal: state.senderProfile.goal },
+        radius, 
+        depth,
+        coords
+      );
       
       const leadsWithIds = results.map((r: any) => ({
         ...r,
@@ -168,7 +156,7 @@ const App: React.FC = () => {
         activeTask: { status: 'COMPLETED', phase: 'Extraction Complete' }
       }));
       
-      showNotification(`Agent found ${leadsWithIds.length} leads with Maps grounding.`);
+      showNotification(`Agent found ${leadsWithIds.length} leads.`);
     } catch (error) {
       console.error(error);
       setState(prev => ({ ...prev, activeTask: { status: 'ERROR', phase: 'Agent encountered an error' } }));
@@ -178,26 +166,17 @@ const App: React.FC = () => {
   const handleAddSponsor = (sponsorData: Omit<Sponsor, 'id'>, dealData: Omit<Deal, 'id' | 'sponsorId'>) => {
     const sponsorId = `sp_${Date.now()}`;
     const dealId = `dl_${Date.now()}`;
-
+    
     setState(prev => ({
       ...prev,
       sponsors: [...prev.sponsors, { ...sponsorData, id: sponsorId }],
       deals: [...prev.deals, { ...dealData, id: dealId, sponsorId, currentSequenceStep: 1 }],
       activities: [
-        ...prev.activities,
+        ...prev.activities, 
         { id: `act_${Date.now()}`, dealId, type: 'NOTE', content: 'Lead incorporated', date: new Date().toISOString() }
       ],
     }));
-
-    // AUTO-NAVIGATION: Switch to Pipeline and highlight new deal
-    setRecentlyAddedDealId(dealId);
-    setActiveTab('board');
-    showNotification(`${sponsorData.companyName} added to Pipeline — Opening Board View`);
-
-    // Clear highlight after 5 seconds
-    setTimeout(() => {
-      setRecentlyAddedDealId(null);
-    }, 5000);
+    showNotification(`${sponsorData.companyName} Added to Board`);
   };
 
   const syncForensicDossierFromLead = useCallback((updatedLead: DiscoveredLead) => {
@@ -222,7 +201,6 @@ const App: React.FC = () => {
       });
 
       const updatedSponsors = prev.sponsors.map(sponsor => {
-        // Find if this sponsor belongs to a deal being updated
         const associatedDeal = updatedDeals.find(d => d.sponsorId === sponsor.id && d.forensicDossier?.sourceLeadId === updatedLead.id);
         if (!associatedDeal) return sponsor;
 
@@ -246,32 +224,55 @@ const App: React.FC = () => {
     showNotification(`Forensic sync complete for ${updatedLead.companyName}`);
   }, []);
 
-  const handleIncorporateSignal = (message: SocialMessage) => {
-    const sponsorData: Omit<Sponsor, 'id'> = {
-      companyName: message.senderName,
-      contactName: message.senderName,
-      email: '',
-      industry: 'Social Lead',
-      socialLinks: { 
-        instagram: message.platform === 'INSTAGRAM' ? `https://instagram.com/${message.senderHandle}` : undefined,
-        linkedIn: message.platform === 'LINKEDIN' ? message.senderHandle : undefined
-      },
-      latestSignal: message.content,
-      primarySignalSource: message.platform
-    };
+  const handleUpdateDeal = useCallback(async (dealId: string, updates: Partial<Deal>) => {
+    const currentDeal = state.deals.find(d => d.id === dealId);
+    if (!currentDeal) return;
 
-    const dealData: Omit<Deal, 'id' | 'sponsorId'> = {
-      stage: PipelineStage.DISCOVERY,
-      amount: 5000,
-      tier: 'Community Partner',
-      notes: `Intercepted Signal: ${message.content}`,
-      currentSequenceStep: 1
-    };
-
-    handleAddSponsor(sponsorData, dealData);
     setState(prev => ({
       ...prev,
-      socialMessages: prev.socialMessages.map(m => m.id === message.id ? { ...m, isArchived: true } : m)
+      deals: prev.deals.map(d => d.id === dealId ? { ...d, ...updates } : d)
+    }));
+
+    // Trigger n8n webhook if Sync Perform IQ is intentional (i.e., we are saving outreach drafts or follow-ups)
+    if (updates.emailDraft || updates.dmDraft || updates.nextFollowUp) {
+      if (state.automationSettings.n8nWebhookUrl) {
+        try {
+          const sponsor = state.sponsors.find(s => s.id === currentDeal.sponsorId);
+          await fetch(state.automationSettings.n8nWebhookUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              event: 'PERFORM_IQ_SYNC',
+              dealId: dealId,
+              companyName: sponsor?.companyName,
+              emailDraft: updates.emailDraft || currentDeal.emailDraft,
+              dmDraft: updates.dmDraft || currentDeal.dmDraft,
+              nextFollowUp: updates.nextFollowUp || currentDeal.nextFollowUp,
+              followUpNote: updates.followUpNote || currentDeal.followUpNote,
+              timestamp: new Date().toISOString()
+            })
+          });
+          showNotification("Automation Sequence Triggered");
+        } catch (err) {
+          console.warn("Automation Sync failed.");
+        }
+      }
+    }
+  }, [state.deals, state.automationSettings, state.sponsors]);
+
+  const handleAddPersona = (persona: Omit<Persona, 'id'>) => {
+    const newPersona = { ...persona, id: `persona_${Date.now()}` };
+    setState(prev => ({
+      ...prev,
+      personas: [...prev.personas, newPersona]
+    }));
+    showNotification(`Persona "${persona.name}" Saved`);
+  };
+
+  const handleRemovePersona = (id: string) => {
+    setState(prev => ({
+      ...prev,
+      personas: prev.personas.filter(p => p.id !== id)
     }));
   };
 
@@ -282,20 +283,12 @@ const App: React.FC = () => {
     }));
   };
 
-  const handleAddIntercept = (msg: SocialMessage) => {
-    setState(prev => ({
-      ...prev,
-      socialMessages: [msg, ...prev.socialMessages]
-    }));
-    showNotification(`New Signal Found for ${msg.senderName}`);
-  };
-
   const handleUpdateAutomation = (settings: Partial<AutomationSettings>) => {
     setState(prev => ({
       ...prev,
       automationSettings: { ...prev.automationSettings, ...settings }
     }));
-    showNotification('Automation Gateway Updated');
+    showNotification('Gateway Configuration Updated');
   };
 
   const handleLogActivity = (dealId: string, type: 'EMAIL' | 'DM' | 'CALL' | 'NOTE', content: string) => {
@@ -317,14 +310,6 @@ const App: React.FC = () => {
       ...prev,
       sponsors: prev.sponsors.map(s => s.id === sponsorId ? { ...s, ...updates } : s)
     }));
-  };
-
-  const handleUpdateDeal = (dealId: string, updates: Partial<Deal>) => {
-    setState(prev => ({
-      ...prev,
-      deals: prev.deals.map(d => d.id === dealId ? { ...d, ...updates } : d)
-    }));
-    showNotification('Follow-up plan saved');
   };
 
   const handleRemoveDeal = (dealId: string) => {
@@ -452,8 +437,10 @@ const App: React.FC = () => {
             onClearSession={() => setState(prev => ({ ...prev, currentDiscoveryLeads: [], activeTask: { status: 'IDLE', phase: '' } }))}
             processedIds={processedKeys}
             onLeadVerified={syncForensicDossierFromLead}
-            senderProfile={state.senderProfile}
-            onUpdateSenderProfile={handleUpdateSenderProfile}
+            personas={state.personas}
+            onSavePersona={handleAddPersona}
+            onRemovePersona={handleRemovePersona}
+            onShowNotification={showNotification}
           />
         )}
 
@@ -462,23 +449,48 @@ const App: React.FC = () => {
             accounts={state.socialAccounts}
             messages={state.socialMessages.filter(m => !m.isArchived)}
             onConnect={(p) => setState(prev => ({ ...prev, socialAccounts: prev.socialAccounts.map(a => a.platform === p ? { ...a, isConnected: true, username: 'scout_synced' } : a) }))}
-            onConvert={handleIncorporateSignal}
-            onAddIntercept={handleAddIntercept}
+            onConvert={(msg) => {
+               const sponsorData: Omit<Sponsor, 'id'> = {
+                 companyName: msg.senderName,
+                 contactName: msg.senderName,
+                 email: '',
+                 industry: 'Signal Prospect',
+                 socialLinks: { 
+                   instagram: msg.platform === 'INSTAGRAM' ? `https://instagram.com/${msg.senderHandle}` : undefined,
+                   linkedIn: msg.platform === 'LINKEDIN' ? msg.senderHandle : undefined
+                 },
+                 latestSignal: msg.content,
+                 primarySignalSource: msg.platform
+               };
+
+               const dealData: Omit<Deal, 'id' | 'sponsorId'> = {
+                 stage: PipelineStage.DISCOVERY,
+                 amount: 5000,
+                 tier: 'Signal Lead',
+                 notes: `Intercepted: ${msg.content}`,
+                 currentSequenceStep: 1
+               };
+
+               handleAddSponsor(sponsorData, dealData);
+               setState(prev => ({
+                 ...prev,
+                 socialMessages: prev.socialMessages.map(m => m.id === msg.id ? { ...m, isArchived: true } : m)
+               }));
+            }}
+            onAddIntercept={(msg) => setState(prev => ({ ...prev, socialMessages: [msg, ...prev.socialMessages] }))}
           />
         )}
 
         {activeTab === 'board' && (
-          <PipelineBoard
-            state={state}
-            onUpdateStage={handleUpdateStage}
-            onSelectDeal={setSelectedDealId}
-            highlightDealId={recentlyAddedDealId}
-            onNavigateBack={() => setActiveTab('extract')}
-          />
+          <PipelineBoard state={state} onUpdateStage={handleUpdateStage} onSelectDeal={setSelectedDealId} />
         )}
 
         {activeTab === 'insights' && (
-          <Dashboard state={state} onUpdateAutomation={handleUpdateAutomation} onNavigateToFlows={() => setActiveTab('flows')} />
+          <Dashboard 
+            state={state} 
+            onUpdateAutomation={handleUpdateAutomation} 
+            onNavigateToFlows={() => setActiveTab('flows')} 
+          />
         )}
 
         {activeTab === 'flows' && (
@@ -538,15 +550,15 @@ const App: React.FC = () => {
       )}
 
       {selectedDeal && selectedSponsor && (
-        <DealDetail
+        <DealDetail 
           deal={selectedDeal}
           sponsor={selectedSponsor}
           activities={dealActivities}
           onClose={() => setSelectedDealId(null)}
           onUpdateStage={handleUpdateStage}
           onLogActivity={handleLogActivity}
-          onUpdateDeal={handleUpdateDeal}
           onUpdateSponsor={handleUpdateSponsor}
+          onUpdateDeal={handleUpdateDeal}
           onRemoveDeal={handleRemoveDeal}
           automationSettings={state.automationSettings}
           senderProfile={state.senderProfile}

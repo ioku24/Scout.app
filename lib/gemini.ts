@@ -1,18 +1,16 @@
-
 import { GoogleGenAI, Type } from "@google/genai";
-import {
-  SenderProfile,
-  DataSource,
-  ContactField,
-  FieldEvidence,
-  DiscoveredLead,
+import { 
+  SenderProfile, 
+  DataSource, 
+  ContactField, 
+  FieldEvidence, 
+  DiscoveredLead, 
   GroundingLink,
   ContactIntelligence,
   ContactMethodType,
-  Deal
+  Deal,
+  Sponsor
 } from "../types.ts";
-import { fullEnrichment, isApolloConfigured } from "./apollo";
-import { scrapeSocialLinks, mergeSocialLinks } from "./scraper";
 
 /**
  * Internal type representing the high-fidelity raw JSON structure from the model.
@@ -50,13 +48,6 @@ type RawDiscoveredLead = {
   };
 };
 
-const getAI = () => {
-  if (!process.env.API_KEY) {
-    throw new Error("API_KEY environment variable is not defined.");
-  }
-  return new GoogleGenAI({ apiKey: process.env.API_KEY });
-};
-
 /**
  * Sanitization Helpers
  */
@@ -64,13 +55,9 @@ function normalizeUrl(url?: string): string | undefined {
   if (!url) return undefined;
   let clean = url.trim();
   if (!clean) return undefined;
-  
-  // Ensure protocol
   if (!/^https?:\/\//i.test(clean)) {
     clean = `https://${clean}`;
   }
-  
-  // Strip common tracking params
   try {
     const u = new URL(clean);
     const paramsToStrip = ['utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content', 'fbclid', 'gclid'];
@@ -85,10 +72,8 @@ function normalizeHandle(handle?: string): string | undefined {
   if (!handle) return undefined;
   let clean = handle.trim();
   if (!clean) return undefined;
-  
   clean = clean.replace(/^@/, '');
   clean = clean.replace(/\/+$/, '');
-  
   return clean;
 }
 
@@ -130,19 +115,32 @@ const extractJson = (text: string) => {
   if (!text) return null;
   const trimmed = text.trim();
   try {
+    // Attempt standard parse
     return JSON.parse(trimmed);
   } catch (e) {
-    const match = trimmed.match(/\[\s*\{[\s\S]*\}\s*\]/);
-    if (match) {
-      try {
-        return JSON.parse(match[0]);
-      } catch (e2) {}
-    }
+    // Fallback: look for markdown block
     const blockMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
     if (blockMatch && blockMatch[1]) {
       try {
         return JSON.parse(blockMatch[1].trim());
       } catch (e2) {}
+    }
+    // Deep fallback: just try to find the first { and last }
+    const start = trimmed.indexOf('{');
+    const end = trimmed.lastIndexOf('}');
+    const startArr = trimmed.indexOf('[');
+    const endArr = trimmed.lastIndexOf(']');
+    
+    // Check if it's an array or object
+    if (startArr !== -1 && (start === -1 || startArr < start)) {
+       try {
+         return JSON.parse(trimmed.slice(startArr, endArr + 1));
+       } catch (e3) {}
+    }
+    if (start !== -1) {
+       try {
+         return JSON.parse(trimmed.slice(start, end + 1));
+       } catch (e4) {}
     }
     return null;
   }
@@ -151,18 +149,15 @@ const extractJson = (text: string) => {
 function mapForensicField(val: string | undefined, evidence?: any): ContactField | undefined {
   const finalValue = val?.trim();
   if (!finalValue) return undefined;
-
   const rawSource = evidence?.source;
   const source: DataSource = 
     ['official_website', 'google_business', 'directory', 'social', 'manual'].includes(rawSource) 
       ? rawSource as DataSource 
       : 'unknown';
-
   let confidence = typeof evidence?.confidence === 'number' ? evidence.confidence : 0.5;
   if (typeof evidence?.confidence !== 'number' && source !== 'unknown') {
     confidence = (source === 'official_website' || source === 'google_business') ? 0.9 : 0.7;
   }
-
   return {
     value: finalValue,
     evidence: {
@@ -175,7 +170,6 @@ function mapForensicField(val: string | undefined, evidence?: any): ContactField
 
 function mapRawLeadToDiscovered(raw: RawDiscoveredLead, groundingLinks: GroundingLink[]): DiscoveredLead {
   const ce = raw.contactEvidence || {};
-  
   const lead: DiscoveredLead = {
     id: `prospect_${crypto.randomUUID()}`,
     companyName: raw.companyName,
@@ -195,7 +189,6 @@ function mapRawLeadToDiscovered(raw: RawDiscoveredLead, groundingLinks: Groundin
     latestSignal: raw.latestSignal,
     groundingSources: groundingLinks,
     sources: raw.sources || [],
-    
     emailField: mapForensicField(raw.email, ce.email),
     phoneField: mapForensicField(raw.phone, ce.phone),
     addressField: mapForensicField(raw.address, ce.address),
@@ -205,50 +198,29 @@ function mapRawLeadToDiscovered(raw: RawDiscoveredLead, groundingLinks: Groundin
     linkedInField: mapForensicField(raw.socialLinks?.linkedIn, ce.linkedIn),
     twitterField: mapForensicField(raw.socialLinks?.twitter, ce.twitter),
   };
-
-  if (ce.latestSignal) {
-    lead.latestSignalEvidence = {
-      source: (ce.latestSignal.source as DataSource) || 'unknown',
-      confidence: ce.latestSignal.confidence || 0.7,
-      sourceUrl: normalizeUrl(ce.latestSignal.sourceUrl)
-    };
-  }
-
   const enriched: ContactIntelligence[] = [];
-  const addIntelligence = (type: ContactMethodType, value: string | undefined, evidenceKey: keyof NonNullable<RawDiscoveredLead['contactEvidence']>) => {
+  const addIntel = (type: ContactMethodType, value: string | undefined, evKey: string) => {
     if (!value) return;
-    const evidence = ce[evidenceKey];
-    const sourceStr = evidence?.source?.replace(/_/g, ' ') || "Public Discovery";
-    let confidence = typeof evidence?.confidence === 'number' ? evidence.confidence : 0.5;
-    if (typeof evidence?.confidence !== 'number') {
-      if (evidenceKey === 'website' || evidenceKey === 'email') confidence = 0.9;
-      else if (['instagram', 'linkedin', 'facebook', 'twitter'].some(s => evidenceKey.toLowerCase().includes(s))) confidence = 0.7;
-    }
-
     enriched.push({
       id: `intel_${crypto.randomUUID()}`,
       type,
-      value: value,
-      confidence: Math.min(1, Math.max(0, confidence)),
-      source: sourceStr,
-      lastVerified: new Date().toISOString(),
-      isPrimary: !enriched.some(e => e.type === type)
+      value,
+      confidence: 0.8,
+      source: "Forensic Discovery",
+      lastVerified: new Date().toISOString()
     });
   };
-
-  addIntelligence('OTHER', lead.website, 'website');
-  addIntelligence('EMAIL', lead.email, 'email');
-  addIntelligence('PHONE', lead.phone, 'phone');
-  addIntelligence('INSTAGRAM', lead.socialLinks.instagram, 'instagram');
-  addIntelligence('LINKEDIN', lead.socialLinks.linkedIn, 'linkedIn');
-  addIntelligence('TWITTER', lead.socialLinks.twitter, 'twitter');
-
+  addIntel('EMAIL', lead.email, 'email');
+  addIntel('PHONE', lead.phone, 'phone');
   lead.enrichedContacts = enriched;
   lead.verificationStatus = 'PENDING';
-
   return lead;
 }
 
+/**
+ * Discover prospects using Gemini and Google Maps.
+ * Note: Uses Gemini 2.5 series as required for Maps grounding.
+ */
 export const discoverProspects = async (
   description: string,
   location: string,
@@ -257,53 +229,28 @@ export const discoverProspects = async (
   depth: 'STANDARD' | 'DEEP' = 'STANDARD',
   userCoords?: { latitude: number; longitude: number }
 ) => {
-  const ai = getAI();
+  const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY
+  // Rule: Maps grounding is only supported in Gemini 2.5 series models.
   const model = 'gemini-2.5-flash';
+  const leadLimit = depth === 'DEEP' ? 10 : 5;
   
-  const leadLimit = depth === 'DEEP' ? 20 : 10;
-  
-  const prompt = `SEARCH_GOAL: Find up to ${leadLimit} business prospects in ${location} within ${radius} miles with high SPONSORSHIP potential for a sports organization.
-  DNA_PROFILE: "${description}"
-  USER_CONTEXT: From ${context.whoWeAre} (${context.role}), seeking partners for: ${context.targetGoal}.
-  
-  SPONSORSHIP_FIT_SIGNALS (PRIORITIZE THESE):
-  1. Companies explicitly seeking sponsorships or brand partners.
-  2. Brands expanding their presence or launching community initiatives.
-  3. Local businesses promoting upcoming events or new product lines.
-  4. Recently funded companies (Seed, Series A, etc.) looking for visibility.
-  5. Organizations with strong local community alignment and active CSR programs.
-
-  EXTRACTION_PROTOCOL (FORENSIC ACCURACY REQUIRED):
-  1. Act as a digital investigator. DO NOT guess social media handles.
-  2. YOU MUST specifically search for verified social links (Instagram, Facebook, X/Twitter, LinkedIn) typically located in the business website's FOOTER or CONTACT page.
-  3. For each prospect, extract: Full Website URL, verified Email, verified direct Phone Number, and all available social handles.
-  4. Verify the physical location is within ${radius} miles of ${location}.
-  5. Return ONLY a valid JSON array of objects.
-
-  SCHEMA:
-  {
-    "companyName": "string",
-    "description": "string (Why they are a great sponsorship fit)",
-    "dnaScore": number (0-100),
-    "matchReasoning": "string (Focus on sponsorship alignment)",
-    "website": "url",
-    "email": "string?",
-    "phone": "string?",
-    "address": "string?",
-    "socialLinks": { "instagram": "handle", "linkedIn": "url", "twitter": "handle", "facebook": "url" },
-    "latestSignal": "string (Recent news or post summary showing sponsorship potential)",
-    "contactEvidence": { "FIELD": { "source": "official_website | google_business | social", "confidence": 0-1, "sourceUrl": "url" } }
-  }`;
+  const prompt = `Find up to ${leadLimit} business prospects in ${location} within ${radius} miles with high SPONSORSHIP potential.
+  DNA: "${description}"
+  CONTEXT: ${context.whoWeAre} (${context.role}) seeking partners for: ${context.targetGoal}.
+  EXTRACT: Website URL, verified Email, Phone, and social handles (IG, LinkedIn, Twitter, FB).
+  Verify the physical location is within range. 
+  RETURN THE RESULTS AS A JSON ARRAY OF OBJECTS with fields: companyName, description, dnaScore, matchReasoning, website, email, phone, address, socialLinks {instagram, linkedIn, twitter, facebook}.`;
 
   try {
     const response = await ai.models.generateContent({
-      model: model,
+      model,
       contents: [{ parts: [{ text: prompt }] }],
       config: {
         tools: [{ googleMaps: {} }, { googleSearch: {} }],
         toolConfig: userCoords ? {
           retrievalConfig: { latLng: { latitude: userCoords.latitude, longitude: userCoords.longitude } }
         } : undefined,
+        // Rule: DO NOT set responseMimeType or responseSchema when using googleMaps.
       }
     });
     
@@ -314,567 +261,204 @@ export const discoverProspects = async (
       title: chunk.maps?.title || chunk.web?.title || 'Verified Grounding'
     })).filter((l: GroundingLink) => l.uri !== '');
 
-    const mappedLeads = results.map((raw: any) => mapRawLeadToDiscovered(raw as RawDiscoveredLead, groundingLinks));
-
-    // STANDARD SCAN: Return immediately (no scraping for speed)
-    // DEEP SCAN: HTML scraping is handled in discoverProspectsDeepScan()
-    console.log(`✅ ${depth} Scan complete: Found ${mappedLeads.length} leads`);
-
-    return mappedLeads;
+    return results.map((raw: any) => mapRawLeadToDiscovered(raw as RawDiscoveredLead, groundingLinks));
   } catch (error) {
-    console.error("Forensic Discovery failure:", error);
+    console.error("Prospect Discovery Error:", error);
     return [];
   }
 };
 
 /**
- * ESCALATION PROTOCOL: Forensic Audit using Gemini 3 Pro + HTML Scraping
- * Performs deep reasoning to disambiguate and verify lead data.
- *
- * PHASE 2.1 UPDATE: Now integrates direct HTML scraping to ensure
- * social media links are actually verified from the website footer.
+ * Search for recent business signals or news using Google Search grounding.
  */
-export const verifyLeadForensically = async (lead: DiscoveredLead) => {
-  const ai = getAI();
-  const model = 'gemini-3-pro-preview';
-
-  console.log(`\n🔍 FORENSIC VERIFICATION: ${lead.companyName}`);
-
-  // STEP 1: Run HTML scraper first to get ground truth from website footer
-  let scrapedSocialLinks: any = {};
-  if (lead.website) {
-    console.log('   Step 1: Running HTML scraper for ground truth...');
-    scrapedSocialLinks = await scrapeSocialLinks(lead.website);
-
-    if (Object.keys(scrapedSocialLinks).length > 0) {
-      console.log(`   ✅ HTML Scraper found ${Object.keys(scrapedSocialLinks).length} social link(s)`);
-    } else {
-      console.log('   ⚠️ HTML Scraper found no social links in footer');
-    }
-  }
-
-  // STEP 2: Run Gemini verification for business logic validation
-  console.log('   Step 2: Running Gemini Pro verification...');
-
-  const prompt = `FORENSIC_AUDIT_PROTOCOL: Verify the following business entity for a high-value partnership.
-  ENTITY: ${lead.companyName}
-  WEBSITE: ${lead.website}
-  LOCATION: ${lead.address || 'Unknown'}
-  CLAIMED_SOCIAL_HANDLES: ${JSON.stringify(lead.socialLinks)}
-  ACTUAL_SCRAPED_HANDLES: ${JSON.stringify(scrapedSocialLinks)}
-
-  TASKS:
-  1. DISAMBIGUATION: Ensure this is not a collision with another company of similar name. Check if it's a specific franchise location vs corporate headquarters.
-  2. DATA_INTEGRITY: The ACTUAL_SCRAPED_HANDLES were directly extracted from the website HTML footer. Use these as ground truth. If CLAIMED_SOCIAL_HANDLES differ from ACTUAL_SCRAPED_HANDLES, the scraped data is correct.
-  3. RISK_ASSESSMENT: Detect if the website is down, parked, or significantly outdated.
-  4. ALIGNMENT: Does this entity truly match the sponsorship intent: "${lead.description}"?
-
-  IMPORTANT: Trust ACTUAL_SCRAPED_HANDLES over CLAIMED_SOCIAL_HANDLES since they came directly from the website HTML.
-
-  RETURN JSON:
-  {
-    "status": "VERIFIED | FAILED | COLLISION_DETECTED",
-    "reasoning": "string (Forensic verdict on sponsorship potential and data accuracy)",
-    "auditTrail": ["string (step by step verification notes, mention if scraped data corrected claimed data)"],
-    "correctedData": {
-      "website": "string?",
-      "email": "string?",
-      "socialLinks": { "instagram": "string?", "linkedIn": "string?", "facebook": "string?", "twitter": "string?" }
-    }
-  }`;
-
+export const performDeepSignalSearch = async (companyName: string, website: string) => {
+  const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY
   try {
     const response = await ai.models.generateContent({
-      model: model,
-      contents: [{ parts: [{ text: prompt }] }],
+      model: 'gemini-3-flash-preview',
+      contents: `Find the most recent and relevant business "signal" for ${companyName} (${website}). A signal could be a recent award, new product launch, expansion, or partnership. Provide a concise one-sentence summary that would be a great "hook" for outreach.`,
       config: {
-        tools: [{ googleSearch: {} }],
-        responseMimeType: "application/json"
+        tools: [{ googleSearch: {} }]
       }
     });
-
-    const geminiResult = extractJson(response.text || '{}');
-
-    // STEP 3: Merge scraped data with Gemini corrections
-    if (geminiResult && geminiResult.correctedData) {
-      // Prioritize scraped social links (ground truth from HTML)
-      geminiResult.correctedData.socialLinks = mergeSocialLinks(
-        geminiResult.correctedData.socialLinks || {},
-        scrapedSocialLinks
-      );
-
-      console.log('   ✅ Verification complete');
-      console.log(`   Status: ${geminiResult.status}`);
-      console.log(`   Reasoning: ${geminiResult.reasoning?.substring(0, 100)}...`);
-
-      if (Object.keys(scrapedSocialLinks).length > 0) {
-        console.log('   📊 Social links verified via HTML scraping');
-      }
-    }
-
-    return geminiResult;
+    return response.text || "No recent public signals identified.";
   } catch (error) {
-    console.error("   ❌ Forensic Audit failure:", error);
+    console.error("Deep Signal Search Error:", error);
+    return "Signal search unavailable.";
+  }
+};
+
+/**
+ * Generate structured outreach drafts (import.meta.env.VITE_GEMINI_API_KEY
+ */
+export const generateOutreachDrafts = async (deal: Deal, sponsor: Sponsor, persona: { teamName: string, role: string, summary: string }) => {
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  try {
+    const response = await ai.models.generateContent({
+      model: 'gemini-3-pro-preview',import.meta.env.VITE_GEMINI_API_KEY
+      contents: `Draft high-conversion partnership outreach for ${sponsor.companyName}. 
+      Our Context: We are ${persona.teamName}. ${persona.summary}. 
+      Deal Tier: ${deal.tier}.
+      Target Contact: ${sponsor.contactName || 'Valued Partner'}.
+      Recent Signal Found: ${sponsor.latestSignal || 'General industry alignment'}.
+      Required Output: One high-impact Email and one short Social DM (IG/LI style).`,
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            emailDraft: { type: Type.STRING, description: "Professional but catchy email draft." },
+            dmDraft: { type: Type.STRING, description: "Short, snappy social DM draft." }
+          },
+          required: ["emailDraft", "dmDraft"]
+        }
+      }
+    });
+    return extractJson(response.text || '') || { emailDraft: "", dmDraft: "" };
+  } catch (error) {
+    console.error("Draft Generation Error:", error);
+    return { emailDraft: "Drafting failed. Please try manual creation.", dmDraft: "Drafting failed." };
+  }
+};
+
+/**
+ * Generate a single outreach draft for a specific platform.
+ */
+export const generateOutreachDraft = async (
+  platform: 'EMAIL' | 'IG' | 'LI' | 'X',
+  companyName: string,
+  contactName: string,
+  tier: string,
+  senderProfile: SenderProfile,
+  latestSignal?: string
+) => {
+  const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY
+  try {
+    const response = await ai.models.generateContent({
+      model: 'gemini-3-flash-preview',
+      contents: `Write a ${platform} outreach message to ${contactName} at ${companyName} for a ${tier} partnership. 
+      Our organization: ${senderProfile.orgName}. 
+      Our Goal: ${senderProfile.goal}. 
+      Recent Signal: ${latestSignal || 'General alignment'}.
+      Style: Modern, professional, and outcome-focused.`,
+    });
+    return response.text || "Failed to generate draft.";
+  } catch (error) {
+    console.error("Single Draft Error:", error);
+    return "Drafting offline.";
+  }
+};
+
+/**
+ * Verify lead information and find missing data points forensically.
+ */
+export const verifyLeadForensically = async (lead: DiscoveredLead) => {
+  const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY
+  try {
+    const response = await ai.models.generateContent({
+      model: 'gemini-3-pro-preview',
+      contents: `Perform a forensic audit on this business prospect: ${lead.companyName} (${lead.website}). 
+      1. Confirm physical existence and location.
+      2. Find missing official emails or specific contact people.
+      3. Validate social handles (IG, LinkedIn).
+      4. Assess "Partnership DNA": Is this company actively sponsoring or growing?`,
+      config: {
+        tools: [{ googleSearch: {} }],
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            status: { type: Type.STRING, enum: ['VERIFIED', 'COLLISION_DETECTED', 'FAILED'] },
+            reasoning: { type: Type.STRING, description: "A summary of the audit findings." },
+            auditTrail: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Steps taken to verify." },
+            correctedData: {
+              type: Type.OBJECT,
+              properties: {
+                website: { type: Type.STRING },
+                email: { type: Type.STRING },
+                socialLinks: {
+                  type: Type.OBJECT,
+                  properties: {
+                    instagram: { type: Type.STRING },
+                    linkedIn: { type: Type.STRING }
+                  }
+                }
+              }
+            }
+          },
+          required: ["status", "reasoning", "auditTrail"]
+        }
+      }
+    });
+    return extractJson(response.text || '');
+  } catch (error) {
+    console.error("Forensic Verification Error:", error);
     return null;
   }
 };
 
-export const generateOutreachDraft = async (
-  platform: string,
-  companyName: string,
-  contactName: string,
-  tier: string,
-  sender: SenderProfile,
-  latestSignal?: string
-) => {
-  const ai = getAI();
-  
-  const ctaMap = {
-    quick_chat: "Open to a quick 10-minute chat to see if there’s a fit?",
-    email_reply: "If it’s easier, feel free to reply here and I can send details.",
-    book_call: "If you’re open, I can share a link to book a quick call."
-  };
+/**
+ * Analyze brand voice and social themes to find a specific "hook".
+ */
+export const getSocialAngle = async (companyName: string, socialUrl: string) => {
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  try {
+    const response = await ai.models.generateContent({
+      model: 'gemini-3-flash-preview',import.meta.env.VITE_GEMINI_API_KEY
+      contents: `Analyze the brand voice and recent social media presence for ${companyName} (${socialUrl}). 
+      Identify content themes, communication style, and a specific "hook" for outreach based on their recent posts.`,
+      config: {
+        tools: [{ googleSearch: {} }],
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            contentThemes: { type: Type.ARRAY, items: { type: Type.STRING } },
+            recentCampaigns: { type: Type.ARRAY, items: { type: Type.STRING } },
+            brandVoice: { type: Type.STRING },
+            outreachHook: { type: Type.STRING }
+          },
+          required: ["contentThemes", "recentCampaigns", "brandVoice", "outreachHook"]
+        }
+      }
+    });
+    return extractJson(response.text || '');
+  } catch (error) {
+    console.error("Social Angle Error:", error);
+    return null;
+  }
+};
 
-  const prompt = `Write a highly personalized ${platform} sponsorship proposal.
-  
-  SENDER IDENTITY (USE THIS EXACT DATA):
-  - Organization: ${sender.orgName}
-  - My Role: ${sender.role || 'Partnership Manager'}
-  - My Goal: ${sender.goal}
-  - My Offer: ${sender.offerOneLiner}
-  
-  RECIPIENT CONTEXT:
-  - Name: ${contactName}
-  - Company: ${companyName}
-  - Proposed Tier: ${tier}
-  - Recent Signal: ${latestSignal || 'Community growth or expansion'}
-  
-  CONSTRUCTION RULES:
-  1. EXACTLY 3 SENTENCES.
-  2. Sentence 1: Personalized hook referencing the SIGNAL (e.g. "I saw ${companyName} is expanding their community reach...").
-  3. Sentence 2: Professional bridge: "I’m with ${sender.orgName} and we're ${sender.goal} through local sports." 
-  4. Sentence 3: Direct CTA: "${ctaMap[sender.ctaStyle as keyof typeof ctaMap]}".
-  5. STYLE: Professional, direct, and outcome-oriented. NO generic pleasantries. NO greetings or signatures.`;
-
+/**
+ * Analyze a public signal (handle or business mention) for potential leads.
+ */
+export const interceptPublicSignal = async (input: string, platform: string) => {
+  const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY
   try {
     const response = await ai.models.generateContent({
       model: 'gemini-3-flash-preview',
-      contents: [{ parts: [{ text: prompt }] }],
-    });
-    return response.text?.trim() || "Failed to generate draft.";
-  } catch (error) {
-    return "Failed to generate draft.";
-  }
-};
-
-/**
- * PERFORM IQ v1: Advanced multi-channel outreach generation
- * Generates personalized drafts based on Deal data and User Persona.
- */
-export async function generateOutreachDrafts(
-  deal: Deal,
-  company: { companyName: string; website?: string; contactName?: string; latestSignal?: string },
-  persona: { teamName: string; role: string; summary: string }
-): Promise<{ emailDraft: string; dmDraft: string }> {
-  const ai = getAI();
-  
-  const prompt = `
-PERFORM_IQ_OUTREACH_ENGINE
-
-You are writing sponsorship outreach for a sports team.
-
-SENDER (TEAM CONTEXT)
-- Team/Org: ${persona.teamName}
-- Sender Role: ${persona.role}
-- Mission/Summary: ${persona.summary}
-
-RECIPIENT (PROSPECT CONTEXT)
-- Company: ${company.companyName}
-- Website: ${company.website || 'N/A'}
-- Tier Target: ${deal.tier}
-- Forensic Reasoning (sponsorship fit): ${deal.forensicDossier?.verificationReasoning || 'Strong brand alignment for community visibility.'}
-- Latest Signal: ${company.latestSignal || 'Expansion, funding, or local community activation.'}
-
-TASK
-1) Write ONE concise cold email:
-   - Include a clear Subject line regarding partnership.
-   - Max 200 words.
-   - Make the value for the company explicit (brand exposure, audience engagement, CSR impact).
-   - Do NOT use clichés like "Hope this email finds you well".
-
-2) Write ONE concise social DM:
-   - Max 80 words.
-   - Suitable for LinkedIn or Instagram DM.
-   - Friendly, direct, and easy to reply to regarding a sponsorship opportunity.
-
-FORMAT
-Return STRICT JSON with exactly two string fields:
-{
-  "emailDraft": "<subject + body as plain text>",
-  "dmDraft": "<dm copy as plain text>"
-}
-
-- No markdown.
-- No bullet lists.
-- No extra keys.
-`;
-
-  try {
-    const response = await ai.models.generateContent({
-      model: 'gemini-3-pro-preview',
-      contents: [{ parts: [{ text: prompt }] }],
+      contents: `Intercept and analyze a business "signal" from the following ${platform} source: "${input}". 
+      Extract the business name, their handle, and a summary of what's happening (the signal). 
+      Estimate how well this business might match a partnership opportunity (0-100).`,
       config: {
-        responseMimeType: "application/json"
-      }
-    });
-    
-    // In this SDK, response.text is a getter that returns the text property of the first candidate.
-    const responseText = response.text || '{}';
-    const result = extractJson(responseText);
-    
-    return {
-      emailDraft: result?.emailDraft || "Failed to generate email draft.",
-      dmDraft: result?.dmDraft || "Failed to generate DM draft."
-    };
-  } catch (error) {
-    console.error("Perform IQ failure:", error);
-    return { emailDraft: "Error generating draft.", dmDraft: "Error generating draft." };
-  }
-}
-
-export const interceptPublicSignal = async (query: string, platform: 'INSTAGRAM' | 'LINKEDIN') => {
-  const ai = getAI();
-  const prompt = `ANALYZE_SIGNAL: "${query}" on ${platform} for sponsorship opportunities. JSON: {senderName, senderHandle, content, identityMatch, suggestedAction}.`;
-  try {
-    const response = await ai.models.generateContent({
-      model: 'gemini-3-pro-preview',
-      contents: [{ parts: [{ text: prompt }] }],
-      config: { tools: [{ googleSearch: {} }], responseMimeType: "application/json" }
-    });
-    return extractJson(response.text || 'null');
-  } catch (error) { return null; }
-};
-
-export const performDeepSignalSearch = async (companyName: string, website: string) => {
-  const ai = getAI();
-  const prompt = `Forensic search for ${companyName} (${website}) for sponsorship signals. Return a 1-sentence conversation starter about their community impact or growth.`;
-  try {
-    const response = await ai.models.generateContent({
-      model: 'gemini-3-pro-preview',
-      contents: [{ parts: [{ text: prompt }] }],
-      config: { tools: [{ googleSearch: {} }] },
-    });
-    return response.text || "No sponsorship signal found.";
-  } catch (error) { return "Intelligence gathering failed."; }
-};
-
-export const getSocialAngle = async (companyName: string, socialUrl: string) => {
-  const ai = getAI();
-  const prompt = `Analyze brand voice of ${companyName} at ${socialUrl} for partnership alignment. JSON: {contentThemes, recentCampaigns, brandVoice, outreachHook}.`;
-  try {
-    const response = await ai.models.generateContent({
-      model: 'gemini-3-pro-preview',
-      contents: [{ parts: [{ text: prompt }] }],
-      config: { tools: [{ googleSearch: {} }], responseMimeType: "application/json" }
-    });
-    return extractJson(response.text || '{}');
-  } catch (error) { return {}; }
-};
-
-/**
- * PHASE 2: Deep Scan Discovery with Apollo.io Enrichment
- *
- * Performs a two-stage enrichment process:
- * 1. Uses Gemini to discover prospects based on DNA profile and location
- * 2. Enriches each lead with Apollo.io company data and decision maker contacts
- *
- * Falls back gracefully to Standard Scan if Apollo API key is not configured.
- */
-export const discoverProspectsDeepScan = async (
-  description: string,
-  location: string,
-  context: { whoWeAre: string, role: string, targetGoal: string },
-  radius: string = '25',
-  userCoords?: { latitude: number; longitude: number }
-): Promise<DiscoveredLead[]> => {
-  console.log('\n🚀 DEEP SCAN MODE INITIATED');
-  console.log(`📍 Location: ${location} (${radius} miles)`);
-  console.log(`🎯 DNA Profile: ${description.substring(0, 100)}...`);
-
-  // Check Apollo configuration
-  if (!isApolloConfigured()) {
-    console.warn('⚠️ Apollo API key not configured. Falling back to Standard Scan.');
-    console.warn('💡 To enable Deep Scan, add APOLLO_API_KEY to your .env file');
-    return discoverProspects(description, location, context, radius, 'STANDARD', userCoords);
-  }
-
-  console.log('✅ Apollo API configured - proceeding with Deep Scan');
-
-  // Step 1: Run Gemini discovery (using DEEP mode for more results)
-  console.log('\n🔍 Step 1: Running Gemini Discovery...');
-  const geminiLeads = await discoverProspects(
-    description,
-    location,
-    context,
-    radius,
-    'DEEP', // Use DEEP mode to get up to 20 leads
-    userCoords
-  );
-
-  console.log(`✅ Gemini discovered ${geminiLeads.length} prospects`);
-
-  if (geminiLeads.length === 0) {
-    console.warn('⚠️ No leads found by Gemini. Returning empty array.');
-    return [];
-  }
-
-  // Step 2: Enrich each lead with Apollo data
-  console.log(`\n💎 Step 2: Enriching ${geminiLeads.length} leads with Apollo.io...`);
-
-  const enrichedLeads = await Promise.all(
-    geminiLeads.map(async (lead, index) => {
-      // Skip enrichment if no website
-      if (!lead.website || lead.website.trim() === '') {
-        console.warn(`⚠️ Lead ${index + 1}/${geminiLeads.length}: ${lead.companyName} - No website, skipping Apollo enrichment`);
-        return lead;
-      }
-
-      try {
-        console.log(`🔍 Enriching ${index + 1}/${geminiLeads.length}: ${lead.companyName} (${lead.website})`);
-
-        // Call Apollo full enrichment (company + contacts)
-        const apolloResult = await fullEnrichment(lead.website);
-
-        if (!apolloResult.success) {
-          console.warn(`⚠️ Apollo enrichment failed for ${lead.companyName}: ${apolloResult.error}`);
-          return lead; // Return original lead if enrichment fails
-        }
-
-        // Merge Apollo data into the lead
-        const enrichedLead: DiscoveredLead = { ...lead };
-
-        // Merge organization data
-        if (apolloResult.organization) {
-          const org = apolloResult.organization;
-
-          // Update phone if Apollo has it and lead doesn't
-          if (org.phone && !enrichedLead.phone) {
-            enrichedLead.phone = org.phone;
-            enrichedLead.phoneField = {
-              value: org.phone,
-              evidence: {
-                source: 'directory' as DataSource,
-                confidence: 0.9,
-                sourceUrl: 'Apollo.io Organization Enrichment'
-              }
-            };
-          }
-
-          // Update address if Apollo has it
-          if (org.street_address && !enrichedLead.address) {
-            const fullAddress = [
-              org.street_address,
-              org.city,
-              org.state,
-              org.postal_code,
-              org.country
-            ].filter(Boolean).join(', ');
-
-            enrichedLead.address = fullAddress;
-            enrichedLead.addressField = {
-              value: fullAddress,
-              evidence: {
-                source: 'directory' as DataSource,
-                confidence: 0.9,
-                sourceUrl: 'Apollo.io Organization Enrichment'
-              }
-            };
-          }
-
-          // Merge social links
-          if (org.linkedin_url && !enrichedLead.socialLinks?.linkedIn) {
-            enrichedLead.socialLinks = {
-              ...enrichedLead.socialLinks,
-              linkedIn: org.linkedin_url,
-              linkedin: org.linkedin_url
-            };
-            enrichedLead.linkedInField = {
-              value: org.linkedin_url,
-              evidence: {
-                source: 'directory' as DataSource,
-                confidence: 0.9,
-                sourceUrl: 'Apollo.io Organization Enrichment'
-              }
-            };
-          }
-
-          if (org.twitter_url && !enrichedLead.socialLinks?.twitter) {
-            enrichedLead.socialLinks = {
-              ...enrichedLead.socialLinks,
-              twitter: org.twitter_url
-            };
-            enrichedLead.twitterField = {
-              value: org.twitter_url,
-              evidence: {
-                source: 'directory' as DataSource,
-                confidence: 0.9,
-                sourceUrl: 'Apollo.io Organization Enrichment'
-              }
-            };
-          }
-
-          if (org.facebook_url && !enrichedLead.socialLinks?.facebook) {
-            enrichedLead.socialLinks = {
-              ...enrichedLead.socialLinks,
-              facebook: org.facebook_url
-            };
-          }
-
-          // Enhance description with Apollo data
-          if (org.short_description) {
-            enrichedLead.description = `${enrichedLead.description}\n\nCompany Info: ${org.short_description}`;
-          }
-        }
-
-        // Merge decision maker contacts
-        if (apolloResult.people && apolloResult.people.length > 0) {
-          const enrichedContacts: ContactIntelligence[] = [];
-
-          apolloResult.people.forEach((person, personIndex) => {
-            // Add email contact
-            if (person.email) {
-              enrichedContacts.push({
-                id: `apollo-email-${personIndex}`,
-                type: 'EMAIL',
-                value: person.email,
-                confidence: person.email_status === 'verified' ? 0.95 : 0.75,
-                source: `Apollo.io - ${person.title || 'Contact'}`,
-                isPrimary: personIndex === 0,
-                lastVerified: new Date().toISOString()
-              });
-
-              // Set primary email if lead doesn't have one
-              if (personIndex === 0 && !enrichedLead.email) {
-                enrichedLead.email = person.email;
-                enrichedLead.emailField = {
-                  value: person.email,
-                  evidence: {
-                    source: 'directory' as DataSource,
-                    confidence: person.email_status === 'verified' ? 0.95 : 0.75,
-                    sourceUrl: 'Apollo.io People Search'
-                  }
-                };
-              }
-            }
-
-            // Add phone contacts
-            if (person.phone_numbers && person.phone_numbers.length > 0) {
-              person.phone_numbers.forEach((phoneObj, phoneIndex) => {
-                if (phoneObj.sanitized_number) {
-                  enrichedContacts.push({
-                    id: `apollo-phone-${personIndex}-${phoneIndex}`,
-                    type: 'PHONE',
-                    value: phoneObj.sanitized_number,
-                    confidence: 0.8,
-                    source: `Apollo.io - ${person.title || 'Contact'}`,
-                    isPrimary: personIndex === 0 && phoneIndex === 0
-                  });
-                }
-              });
-            }
-
-            // Add LinkedIn contact
-            if (person.linkedin_url) {
-              enrichedContacts.push({
-                id: `apollo-linkedin-${personIndex}`,
-                type: 'LINKEDIN',
-                value: person.linkedin_url,
-                confidence: 0.9,
-                source: `Apollo.io - ${person.title || 'Contact'}`,
-                isPrimary: personIndex === 0
-              });
-            }
-          });
-
-          // Merge with existing enriched contacts
-          enrichedLead.enrichedContacts = [
-            ...(enrichedLead.enrichedContacts || []),
-            ...enrichedContacts
-          ];
-
-          console.log(`✅ Added ${enrichedContacts.length} contact points for ${lead.companyName}`);
-        }
-
-        return enrichedLead;
-      } catch (error) {
-        console.error(`❌ Error enriching ${lead.companyName}:`, error);
-        return lead; // Return original lead on error
-      }
-    })
-  );
-
-  // Step 3: HTML Scraping Fallback (for leads still missing social links)
-  console.log('\n🕷️ Step 3: Running HTML scraper fallback for remaining social links...');
-
-  const finalEnrichedLeads = await Promise.all(
-    enrichedLeads.map(async (lead) => {
-      // Skip if no website
-      if (!lead.website) return lead;
-
-      // Always run scraper to fill in missing social links
-      // The mergeSocialLinks() function won't overwrite existing data
-      console.log(`🕷️ ${lead.companyName}: Running HTML scraper to fill in missing social links...`);
-      const scrapedLinks = await scrapeSocialLinks(lead.website);
-
-      // Merge scraped links with existing data
-      if (Object.keys(scrapedLinks).length > 0) {
-        const mergedLinks = mergeSocialLinks(lead.socialLinks || {}, scrapedLinks);
-
-        console.log(`   ✅ HTML scraper found ${Object.keys(scrapedLinks).length} social link(s)`);
-
-        return {
-          ...lead,
-          socialLinks: {
-            instagram: mergedLinks.instagram,
-            linkedIn: mergedLinks.linkedIn,
-            linkedin: mergedLinks.linkedIn,
-            facebook: mergedLinks.facebook,
-            twitter: mergedLinks.twitter,
+        tools: [{ googleSearch: {} }],
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            senderName: { type: Type.STRING },
+            senderHandle: { type: Type.STRING },
+            content: { type: Type.STRING },
+            identityMatch: { type: Type.NUMBER, description: "Match score 0 to 100." },
+            suggestedAction: { type: Type.STRING }
           },
-          instagramField: mergedLinks.instagram ? {
-            value: mergedLinks.instagram,
-            evidence: {
-              source: 'official_website' as DataSource,
-              confidence: 0.85,
-              sourceUrl: `${lead.website} (HTML Scraper)`
-            }
-          } : lead.instagramField,
-          linkedInField: mergedLinks.linkedIn ? {
-            value: mergedLinks.linkedIn,
-            evidence: {
-              source: 'official_website' as DataSource,
-              confidence: 0.85,
-              sourceUrl: `${lead.website} (HTML Scraper)`
-            }
-          } : lead.linkedInField,
-          twitterField: mergedLinks.twitter ? {
-            value: mergedLinks.twitter,
-            evidence: {
-              source: 'official_website' as DataSource,
-              confidence: 0.85,
-              sourceUrl: `${lead.website} (HTML Scraper)`
-            }
-          } : lead.twitterField,
-        };
+          required: ["senderName", "senderHandle", "content", "identityMatch", "suggestedAction"]
+        }
       }
-
-      console.log(`   ⚠️ HTML scraper found no social links for ${lead.companyName}`);
-      return lead;
-    })
-  );
-
-  console.log('\n✅ DEEP SCAN COMPLETED');
-  console.log(`📊 Results: ${finalEnrichedLeads.length} leads fully enriched`);
-
-  return finalEnrichedLeads;
+    });
+    return extractJson(response.text || '');
+  } catch (error) {
+    console.error("Signal Intercept Error:", error);
+    return null;
+  }
 };

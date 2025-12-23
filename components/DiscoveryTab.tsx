@@ -1,6 +1,5 @@
-
 import React, { useState, useEffect } from 'react';
-import { DiscoveredLead, DiscoverySession, AgentTask, SenderProfile } from '../types';
+import { DiscoveredLead, DiscoverySession, AgentTask, Persona } from '../types';
 import { getIdentityKeys, verifyLeadForensically } from '../lib/gemini';
 
 interface DiscoveryTabProps {
@@ -14,23 +13,27 @@ interface DiscoveryTabProps {
   onClearSession: () => void;
   processedIds: string[];
   onLeadVerified?: (lead: DiscoveredLead) => void;
-  senderProfile: SenderProfile;
-  onUpdateSenderProfile: (updates: Partial<SenderProfile>) => void;
+  personas: Persona[];
+  onSavePersona: (persona: Omit<Persona, 'id'>) => void;
+  onRemovePersona: (id: string) => void;
+  onShowNotification?: (msg: string) => void;
 }
 
-const DiscoveryTab: React.FC<DiscoveryTabProps> = ({
-  currentLeads,
-  onUpdateLeads,
-  onAddAsLead,
-  onSaveToVault,
+const DiscoveryTab: React.FC<DiscoveryTabProps> = ({ 
+  currentLeads, 
+  onUpdateLeads, 
+  onAddAsLead, 
+  onSaveToVault, 
   onStartSearch,
   activeTask,
   history,
   onClearSession,
   processedIds,
   onLeadVerified,
-  senderProfile,
-  onUpdateSenderProfile
+  personas,
+  onSavePersona,
+  onRemovePersona,
+  onShowNotification
 }) => {
   const [description, setDescription] = useState(activeTask.query || '');
   const [location, setLocation] = useState(activeTask.location || '');
@@ -41,11 +44,11 @@ const DiscoveryTab: React.FC<DiscoveryTabProps> = ({
   const [dnaPreview, setDnaPreview] = useState<string | null>(null);
   const [userCoords, setUserCoords] = useState<{latitude: number, longitude: number} | null>(null);
   const [selectedProspect, setSelectedProspect] = useState<DiscoveredLead | null>(null);
+  const [personaName, setPersonaName] = useState('');
 
-  // Guided Builder State
   const [builder, setBuilder] = useState({
     industry: 'Sporting goods brands',
-    size: '11-50',
+    size: 'Any',
     intent: 'Seeking sponsorships',
     channels: {
       instagram: false,
@@ -70,11 +73,11 @@ const DiscoveryTab: React.FC<DiscoveryTabProps> = ({
     if (activeTask.location && !location) setLocation(activeTask.location);
     
     if (activeTask.status === 'SEARCHING') {
-      const sources = ['LinkedIn', 'Google Maps', 'Yelp', 'Instagram', 'Facebook', 'Twitter'];
+      const sources = ['LinkedIn', 'Google Maps', 'Apollo Hub', 'Instagram', 'Twitter'];
       setSearchLogs([`[SIGNAL] Initiating forensic scan on ${location}...`]);
       const interval = setInterval(() => {
         const source = sources[Math.floor(Math.random() * sources.length)];
-        const action = ['Intercepting', 'Grounding', 'Validating', 'Mapping', 'Scraping'][Math.floor(Math.random() * 5)];
+        const action = ['Intercepting', 'Grounding', 'Validating', 'Enriching', 'Mapping'][Math.floor(Math.random() * 5)];
         setSearchLogs(prev => [...prev, `[${action.toUpperCase()}] ${source} data node...`].slice(-6));
       }, 1500);
       return () => clearInterval(interval);
@@ -94,10 +97,10 @@ const DiscoveryTab: React.FC<DiscoveryTabProps> = ({
     const channelsCsvOrAny = selectedChannels.length > 0 ? selectedChannels.join(', ') : 'Any available';
     const loc = location || 'your target city';
     const rad = radius || '25';
-    const sizeDescriptor = builder.size === 'Any Size' ? 'of any company size' : `businesses with ${builder.size} employees`;
-
+    const sizeDescriptor = builder.size === 'Any' ? 'of any size' : (builder.size === 'Solo' ? 'solo-operators' : `businesses with ${builder.size} employees`);
+    
     const dnaString = `Find ${builder.industry} that are ${sizeDescriptor} within ${rad} miles of ${loc}. Prioritize prospects showing: ${builder.intent}. Required Data: Website, Email, Phone Number, and Social Media handles (${channelsCsvOrAny}). Optimize for partnership fit and responsiveness. Return only public, verified, and forensic information extracted from official sources.`;
-
+    
     setDnaPreview(dnaString);
   };
 
@@ -105,6 +108,28 @@ const DiscoveryTab: React.FC<DiscoveryTabProps> = ({
     if (dnaPreview) {
       setDescription(dnaPreview);
     }
+  };
+
+  const handleSavePersona = () => {
+    if (!personaName.trim()) return;
+    onSavePersona({
+      name: personaName,
+      industry: builder.industry,
+      size: builder.size,
+      intent: builder.intent,
+      channels: builder.channels
+    });
+    setPersonaName('');
+  };
+
+  const handleLoadPersona = (p: Persona) => {
+    setBuilder({
+      industry: p.industry,
+      size: p.size,
+      intent: p.intent,
+      channels: p.channels
+    });
+    onShowNotification?.(`Loaded Persona: ${p.name}`);
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -151,7 +176,6 @@ const DiscoveryTab: React.FC<DiscoveryTabProps> = ({
       
       onUpdateLeads(currentLeads.map(l => l.id === leadId ? updatedLead : l));
       
-      // Notify App to sync any existing deals created from this lead
       if (onLeadVerified) {
         onLeadVerified(updatedLead);
       }
@@ -196,50 +220,38 @@ const DiscoveryTab: React.FC<DiscoveryTabProps> = ({
           </div>
         </div>
 
+        {/* Saved Personas Row */}
+        {personas.length > 0 && (
+          <div className="mb-10 space-y-3">
+             <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em] ml-2">DNA Templates</h3>
+             <div className="flex gap-3 overflow-x-auto pb-4 custom-scrollbar">
+                {personas.map(p => (
+                  <div key={p.id} className="flex-shrink-0 group relative">
+                    <button 
+                      onClick={() => handleLoadPersona(p)}
+                      className="px-6 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-[10px] font-black uppercase tracking-widest hover:border-blue-600 transition-all"
+                    >
+                      {p.name}
+                    </button>
+                    <button 
+                      onClick={() => onRemovePersona(p.id)}
+                      className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                    >
+                      <svg className="w-2 h-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="4" d="M6 18L18 6M6 6l12 12"/></svg>
+                    </button>
+                  </div>
+                ))}
+             </div>
+          </div>
+        )}
+
         {/* Guided DNA Builder */}
         <div className="mb-12 p-8 bg-blue-50 dark:bg-blue-900/10 rounded-[2.5rem] border border-blue-100 dark:border-blue-800/50 space-y-8 transition-all">
            <div className="flex items-center justify-between">
               <h3 className="text-[11px] font-black text-blue-600 dark:text-blue-400 uppercase tracking-[0.3em]">Guided DNA Builder</h3>
               <p className="text-[9px] font-bold text-blue-400 uppercase">Construct forensic profile</p>
            </div>
-
-           {/* Sender Profile Section */}
-           <div className="p-6 bg-white/60 dark:bg-slate-800/40 rounded-2xl border border-blue-200/50 dark:border-blue-700/30 space-y-5">
-              <h4 className="text-[10px] font-black text-blue-700 dark:text-blue-300 uppercase tracking-[0.25em]">Your Organization Context</h4>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-                <div className="space-y-1.5">
-                  <label className="text-[9px] font-black uppercase text-slate-500 tracking-widest pl-1">Who We Are</label>
-                  <input
-                    type="text"
-                    value={senderProfile.orgName}
-                    onChange={e => onUpdateSenderProfile({ orgName: e.target.value })}
-                    placeholder="e.g., Detroit Youth Basketball League"
-                    className="w-full h-11 bg-white dark:bg-slate-800 border border-blue-100 dark:border-blue-800 rounded-xl px-4 text-xs font-medium outline-none shadow-sm transition-colors focus:border-blue-600"
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <label className="text-[9px] font-black uppercase text-slate-500 tracking-widest pl-1">Your Role</label>
-                  <input
-                    type="text"
-                    value={senderProfile.role || ''}
-                    onChange={e => onUpdateSenderProfile({ role: e.target.value })}
-                    placeholder="e.g., Program Director"
-                    className="w-full h-11 bg-white dark:bg-slate-800 border border-blue-100 dark:border-blue-800 rounded-xl px-4 text-xs font-medium outline-none shadow-sm transition-colors focus:border-blue-600"
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <label className="text-[9px] font-black uppercase text-slate-500 tracking-widest pl-1">Target Goal</label>
-                  <input
-                    type="text"
-                    value={senderProfile.goal}
-                    onChange={e => onUpdateSenderProfile({ goal: e.target.value })}
-                    placeholder="e.g., Secure sponsorships for youth programs"
-                    className="w-full h-11 bg-white dark:bg-slate-800 border border-blue-100 dark:border-blue-800 rounded-xl px-4 text-xs font-medium outline-none shadow-sm transition-colors focus:border-blue-600"
-                  />
-                </div>
-              </div>
-           </div>
-
+           
            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
               <div className="space-y-1.5">
                 <label className="text-[9px] font-black uppercase text-slate-500 tracking-widest pl-1">Industry</label>
@@ -267,17 +279,18 @@ const DiscoveryTab: React.FC<DiscoveryTabProps> = ({
               </div>
               <div className="space-y-1.5">
                 <label className="text-[9px] font-black uppercase text-slate-500 tracking-widest pl-1">Company Size</label>
-                <select
+                <select 
                   value={builder.size}
                   onChange={e => setBuilder({...builder, size: e.target.value})}
                   className="w-full h-11 bg-white dark:bg-slate-800 border border-blue-100 dark:border-blue-800 rounded-xl px-4 text-xs font-bold outline-none shadow-sm transition-colors"
                 >
-                  <option>Any Size</option>
-                  <option>1-10</option>
+                  <option>Any</option>
+                  <option>Solo</option>
+                  <option>2-10</option>
                   <option>11-50</option>
                   <option>51-200</option>
-                  <option>201-500</option>
-                  <option>500+</option>
+                  <option>201-1000</option>
+                  <option>1000+</option>
                 </select>
               </div>
               <div className="space-y-1.5">
@@ -322,13 +335,31 @@ const DiscoveryTab: React.FC<DiscoveryTabProps> = ({
              </div>
            </div>
 
-           <button 
-            type="button"
-            onClick={handleBuildDNA}
-            className="w-full py-4 bg-blue-600 text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-blue-700 transition-all shadow-lg shadow-blue-500/10 active:scale-[0.98]"
-           >
-             Generate Profile Preview
-           </button>
+           <div className="flex gap-4">
+              <button 
+                type="button"
+                onClick={handleBuildDNA}
+                className="flex-grow py-4 bg-blue-600 text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-blue-700 transition-all shadow-lg shadow-blue-500/10 active:scale-[0.98]"
+              >
+                Generate Profile Preview
+              </button>
+              <div className="flex items-center gap-2">
+                 <input 
+                  value={personaName}
+                  onChange={e => setPersonaName(e.target.value)}
+                  placeholder="Persona Name"
+                  className="w-40 h-12 bg-white dark:bg-slate-800 border border-blue-100 dark:border-blue-800 rounded-xl px-4 text-xs font-bold outline-none"
+                 />
+                 <button 
+                  type="button"
+                  onClick={handleSavePersona}
+                  disabled={!personaName.trim()}
+                  className="px-6 py-4 bg-slate-900 dark:bg-slate-700 text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-blue-600 transition-all disabled:opacity-50"
+                 >
+                   Save DNA
+                 </button>
+              </div>
+           </div>
 
            {dnaPreview && (
              <div className="mt-6 space-y-4 animate-fade-in">
@@ -397,7 +428,6 @@ const DiscoveryTab: React.FC<DiscoveryTabProps> = ({
         </form>
       </div>
 
-      {/* Leads Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {currentLeads.map(lead => {
           const processed = isProcessed(lead);
@@ -464,7 +494,6 @@ const DiscoveryTab: React.FC<DiscoveryTabProps> = ({
         })}
       </div>
 
-      {/* Enlarged Preview Modal */}
       {selectedProspect && (
         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-md z-[100] flex items-center justify-center p-6 animate-fade-in" onClick={() => setSelectedProspect(null)}>
           <div 

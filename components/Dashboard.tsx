@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 import { AppState, PipelineStage, AutomationSettings } from '../types';
@@ -11,7 +10,7 @@ interface DashboardProps {
 }
 
 const Dashboard: React.FC<DashboardProps> = ({ state, onUpdateAutomation, onNavigateToFlows }) => {
-  const [configTarget, setConfigTarget] = useState<'N8N' | 'AGENT' | null>(null);
+  const [configTarget, setConfigTarget] = useState<'N8N' | 'AGENT' | 'APOLLO' | null>(null);
   const isDark = state.theme === 'dark';
   
   const pipelineValue = state.deals.reduce((acc, deal) => acc + deal.amount, 0);
@@ -88,9 +87,26 @@ const Dashboard: React.FC<DashboardProps> = ({ state, onUpdateAutomation, onNavi
               <div className="flex items-center gap-5">
                 <div className="w-12 h-12 rounded-2xl bg-orange-500/20 text-orange-400 flex items-center justify-center font-black text-xs shadow-inner">n8n</div>
                 <div>
-                  <p className="text-[12px] font-black uppercase tracking-widest mb-0.5">n8n Pipeline</p>
+                  <p className="text-[12px] font-black uppercase tracking-widest mb-0.5">n8n Gateway</p>
                   <p className="text-[9px] font-bold text-slate-500 uppercase">
-                    {state.automationSettings?.n8nWebhookUrl ? 'Webhook Configured' : 'Connect Endpoint'}
+                    {state.automationSettings?.n8nWebhookUrl ? 'Webhook Linked' : 'Connect Endpoint'}
+                  </p>
+                </div>
+              </div>
+              <svg className="w-4 h-4 text-slate-600 group-hover/node:text-white transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M9 5l7 7-7 7"/></svg>
+            </div>
+
+            {/* Apollo Intelligence Node */}
+            <div 
+              onClick={() => setConfigTarget('APOLLO')}
+              className="p-6 bg-white/5 border border-white/10 rounded-3xl flex items-center justify-between group/node hover:bg-white/10 hover:border-white/20 transition-all cursor-pointer"
+            >
+              <div className="flex items-center gap-5">
+                <div className="w-12 h-12 rounded-2xl bg-indigo-500/20 text-indigo-400 flex items-center justify-center font-black text-xs shadow-inner">API</div>
+                <div>
+                  <p className="text-[12px] font-black uppercase tracking-widest mb-0.5">Forensic Enrichment</p>
+                  <p className="text-[9px] font-bold text-slate-500 uppercase">
+                    {state.automationSettings?.apolloApiKey ? 'Apollo Key Configured' : 'Missing External Key'}
                   </p>
                 </div>
               </div>
@@ -114,13 +130,6 @@ const Dashboard: React.FC<DashboardProps> = ({ state, onUpdateAutomation, onNavi
                 </div>
               </div>
               <svg className="w-4 h-4 text-slate-600 group-hover/node:text-white transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M9 5l7 7-7 7"/></svg>
-            </div>
-
-            {/* Event Log (Pseudo-terminal) */}
-            <div className="mt-4 p-5 bg-black/40 rounded-2xl border border-white/5 font-mono text-[9px] text-slate-500 space-y-2 max-h-[120px] overflow-hidden transition-colors">
-               <p><span className="text-blue-500">PROMPT:</span> Triage Agent initialized...</p>
-               <p><span className="text-emerald-500">SYNC:</span> Webhook heartbeat detected.</p>
-               <p><span className="text-slate-600">IDLE:</span> Waiting for deployment event.</p>
             </div>
           </div>
 
@@ -148,17 +157,33 @@ const Dashboard: React.FC<DashboardProps> = ({ state, onUpdateAutomation, onNavi
                   className="w-full h-14 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl px-6 text-xs font-bold text-slate-900 dark:text-white outline-none focus:border-blue-600 shadow-inner"
                 />
               </div>
-              <div className="flex items-center justify-between p-4 bg-blue-50 dark:bg-blue-900/20 rounded-2xl">
-                 <span className="text-[10px] font-black uppercase text-blue-600 dark:text-blue-400">Trigger on Deploy</span>
-                 <input 
-                  type="checkbox" 
-                  checked={state.automationSettings?.notifyOnDeploy || false}
-                  onChange={(e) => onUpdateAutomation?.({ notifyOnDeploy: e.target.checked })}
-                  className="w-5 h-5 accent-blue-600"
-                 />
-              </div>
             </div>
             <button onClick={() => setConfigTarget(null)} className="w-full py-5 bg-slate-900 dark:bg-white text-white dark:text-slate-900 rounded-2xl text-[10px] font-black uppercase tracking-widest">Save Gateway</button>
+          </div>
+        </div>
+      )}
+
+      {configTarget === 'APOLLO' && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[100] flex items-center justify-center p-6 animate-fade-in">
+          <div className="bg-white dark:bg-slate-900 w-full max-w-md rounded-[2.5rem] p-10 shadow-2xl space-y-8 border border-slate-100 dark:border-slate-800 transition-colors">
+            <div>
+              <h4 className="text-2xl font-black text-slate-900 dark:text-white brand-font uppercase tracking-tight">Enrichment Key</h4>
+              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-2">External Data Enrichment (Apollo.io)</p>
+            </div>
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <label className="text-[9px] font-black uppercase text-slate-500 tracking-widest">Apollo.io API Key</label>
+                <input 
+                  type="password"
+                  value={state.automationSettings?.apolloApiKey || ''} 
+                  onChange={(e) => onUpdateAutomation?.({ apolloApiKey: e.target.value })}
+                  placeholder="api_key_..." 
+                  className="w-full h-14 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl px-6 text-xs font-bold text-slate-900 dark:text-white outline-none focus:border-blue-600 shadow-inner"
+                />
+                <p className="text-[8px] font-bold text-slate-500 uppercase mt-1 px-2">Key is stored locally in your browser cache.</p>
+              </div>
+            </div>
+            <button onClick={() => setConfigTarget(null)} className="w-full py-5 bg-slate-900 dark:bg-white text-white dark:text-slate-900 rounded-2xl text-[10px] font-black uppercase tracking-widest">Save Intelligence Key</button>
           </div>
         </div>
       )}
