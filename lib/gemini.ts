@@ -229,9 +229,9 @@ export const discoverProspects = async (
   depth: 'STANDARD' | 'DEEP' = 'STANDARD',
   userCoords?: { latitude: number; longitude: number }
 ) => {
-  const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   // Rule: Maps grounding is only supported in Gemini 2.5 series models.
-  const model = 'gemini-2.5-flash';
+  const model = 'gemini-2.5-flash-preview';
   const leadLimit = depth === 'DEEP' ? 10 : 5;
   
   const prompt = `Find up to ${leadLimit} business prospects in ${location} within ${radius} miles with high SPONSORSHIP potential.
@@ -250,7 +250,6 @@ export const discoverProspects = async (
         toolConfig: userCoords ? {
           retrievalConfig: { latLng: { latitude: userCoords.latitude, longitude: userCoords.longitude } }
         } : undefined,
-        // Rule: DO NOT set responseMimeType or responseSchema when using googleMaps.
       }
     });
     
@@ -272,7 +271,7 @@ export const discoverProspects = async (
  * Search for recent business signals or news using Google Search grounding.
  */
 export const performDeepSignalSearch = async (companyName: string, website: string) => {
-  const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   try {
     const response = await ai.models.generateContent({
       model: 'gemini-3-flash-preview',
@@ -289,13 +288,13 @@ export const performDeepSignalSearch = async (companyName: string, website: stri
 };
 
 /**
- * Generate structured outreach drafts (import.meta.env.VITE_GEMINI_API_KEY
+ * Generate structured outreach drafts (Email and DM) using Gemini 3 Pro.
  */
 export const generateOutreachDrafts = async (deal: Deal, sponsor: Sponsor, persona: { teamName: string, role: string, summary: string }) => {
-  const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY });
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   try {
     const response = await ai.models.generateContent({
-      model: 'gemini-3-pro-preview',import.meta.env.VITE_GEMINI_API_KEY
+      model: 'gemini-3-pro-preview',
       contents: `Draft high-conversion partnership outreach for ${sponsor.companyName}. 
       Our Context: We are ${persona.teamName}. ${persona.summary}. 
       Deal Tier: ${deal.tier}.
@@ -332,7 +331,7 @@ export const generateOutreachDraft = async (
   senderProfile: SenderProfile,
   latestSignal?: string
 ) => {
-  const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   try {
     const response = await ai.models.generateContent({
       model: 'gemini-3-flash-preview',
@@ -353,7 +352,7 @@ export const generateOutreachDraft = async (
  * Verify lead information and find missing data points forensically.
  */
 export const verifyLeadForensically = async (lead: DiscoveredLead) => {
-  const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   try {
     const response = await ai.models.generateContent({
       model: 'gemini-3-pro-preview',
@@ -401,10 +400,10 @@ export const verifyLeadForensically = async (lead: DiscoveredLead) => {
  * Analyze brand voice and social themes to find a specific "hook".
  */
 export const getSocialAngle = async (companyName: string, socialUrl: string) => {
-  const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY });
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   try {
     const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',import.meta.env.VITE_GEMINI_API_KEY
+      model: 'gemini-3-flash-preview',
       contents: `Analyze the brand voice and recent social media presence for ${companyName} (${socialUrl}). 
       Identify content themes, communication style, and a specific "hook" for outreach based on their recent posts.`,
       config: {
@@ -433,7 +432,7 @@ export const getSocialAngle = async (companyName: string, socialUrl: string) => 
  * Analyze a public signal (handle or business mention) for potential leads.
  */
 export const interceptPublicSignal = async (input: string, platform: string) => {
-  const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   try {
     const response = await ai.models.generateContent({
       model: 'gemini-3-flash-preview',

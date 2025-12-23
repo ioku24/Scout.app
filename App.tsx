@@ -8,9 +8,11 @@ import SponsorForm from './components/SponsorForm.tsx';
 import DealDetail from './components/DealDetail.tsx';
 import WorkflowBuilder from './components/WorkflowBuilder.tsx';
 import SocialInbox from './components/SocialInbox.tsx';
-import { discoverProspects, discoverProspectsDeepScan, getIdentityKeys } from './lib/gemini.ts';
-const STORAGE_KEY = 'scout_crm_v4_final_auto_v5';
-const CURRENT_STATE_VERSION = 1;
+import { discoverProspects, getIdentityKeys } from './lib/gemini.ts';
+
+const STORAGE_KEY = 'scout_crm_v5_persistent_logic';
+const CURRENT_STATE_VERSION = 2;
+
 const migrateState = (payload: any): AppState => {
   if (!payload || !payload.stateVersion) return payload;
   const oldState = payload.state;
