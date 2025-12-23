@@ -434,6 +434,8 @@ const App: React.FC = () => {
             onClearSession={() => setState(prev => ({ ...prev, currentDiscoveryLeads: [], activeTask: { status: 'IDLE', phase: '' } }))}
             processedIds={processedKeys}
             onLeadVerified={syncForensicDossierFromLead}
+            senderProfile={state.senderProfile}
+            onUpdateSenderProfile={handleUpdateSenderProfile}
           />
         )}
 

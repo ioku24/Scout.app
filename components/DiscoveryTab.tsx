@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { DiscoveredLead, DiscoverySession, AgentTask } from '../types';
+import { DiscoveredLead, DiscoverySession, AgentTask, SenderProfile } from '../types';
 import { getIdentityKeys, verifyLeadForensically } from '../lib/gemini';
 
 interface DiscoveryTabProps {
@@ -14,19 +14,23 @@ interface DiscoveryTabProps {
   onClearSession: () => void;
   processedIds: string[];
   onLeadVerified?: (lead: DiscoveredLead) => void;
+  senderProfile: SenderProfile;
+  onUpdateSenderProfile: (updates: Partial<SenderProfile>) => void;
 }
 
-const DiscoveryTab: React.FC<DiscoveryTabProps> = ({ 
-  currentLeads, 
-  onUpdateLeads, 
-  onAddAsLead, 
-  onSaveToVault, 
+const DiscoveryTab: React.FC<DiscoveryTabProps> = ({
+  currentLeads,
+  onUpdateLeads,
+  onAddAsLead,
+  onSaveToVault,
   onStartSearch,
   activeTask,
   history,
   onClearSession,
   processedIds,
-  onLeadVerified
+  onLeadVerified,
+  senderProfile,
+  onUpdateSenderProfile
 }) => {
   const [description, setDescription] = useState(activeTask.query || '');
   const [location, setLocation] = useState(activeTask.location || '');
@@ -198,7 +202,44 @@ const DiscoveryTab: React.FC<DiscoveryTabProps> = ({
               <h3 className="text-[11px] font-black text-blue-600 dark:text-blue-400 uppercase tracking-[0.3em]">Guided DNA Builder</h3>
               <p className="text-[9px] font-bold text-blue-400 uppercase">Construct forensic profile</p>
            </div>
-           
+
+           {/* Sender Profile Section */}
+           <div className="p-6 bg-white/60 dark:bg-slate-800/40 rounded-2xl border border-blue-200/50 dark:border-blue-700/30 space-y-5">
+              <h4 className="text-[10px] font-black text-blue-700 dark:text-blue-300 uppercase tracking-[0.25em]">Your Organization Context</h4>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+                <div className="space-y-1.5">
+                  <label className="text-[9px] font-black uppercase text-slate-500 tracking-widest pl-1">Who We Are</label>
+                  <input
+                    type="text"
+                    value={senderProfile.orgName}
+                    onChange={e => onUpdateSenderProfile({ orgName: e.target.value })}
+                    placeholder="e.g., Detroit Youth Basketball League"
+                    className="w-full h-11 bg-white dark:bg-slate-800 border border-blue-100 dark:border-blue-800 rounded-xl px-4 text-xs font-medium outline-none shadow-sm transition-colors focus:border-blue-600"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-[9px] font-black uppercase text-slate-500 tracking-widest pl-1">Your Role</label>
+                  <input
+                    type="text"
+                    value={senderProfile.role || ''}
+                    onChange={e => onUpdateSenderProfile({ role: e.target.value })}
+                    placeholder="e.g., Program Director"
+                    className="w-full h-11 bg-white dark:bg-slate-800 border border-blue-100 dark:border-blue-800 rounded-xl px-4 text-xs font-medium outline-none shadow-sm transition-colors focus:border-blue-600"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-[9px] font-black uppercase text-slate-500 tracking-widest pl-1">Target Goal</label>
+                  <input
+                    type="text"
+                    value={senderProfile.goal}
+                    onChange={e => onUpdateSenderProfile({ goal: e.target.value })}
+                    placeholder="e.g., Secure sponsorships for youth programs"
+                    className="w-full h-11 bg-white dark:bg-slate-800 border border-blue-100 dark:border-blue-800 rounded-xl px-4 text-xs font-medium outline-none shadow-sm transition-colors focus:border-blue-600"
+                  />
+                </div>
+              </div>
+           </div>
+
            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
               <div className="space-y-1.5">
                 <label className="text-[9px] font-black uppercase text-slate-500 tracking-widest pl-1">Industry</label>
