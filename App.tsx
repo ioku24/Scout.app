@@ -8,7 +8,7 @@ import SponsorForm from './components/SponsorForm.tsx';
 import DealDetail from './components/DealDetail.tsx';
 import WorkflowBuilder from './components/WorkflowBuilder.tsx';
 import SocialInbox from './components/SocialInbox.tsx';
-import { discoverProspects, getIdentityKeys } from './lib/gemini.ts';
+import { discoverProspects, discoverProspectsDeepScan, getIdentityKeys } from './lib/gemini.ts';
 
 const STORAGE_KEY = 'scout_crm_v4_final_auto_v5';
 const CURRENT_STATE_VERSION = 1;
@@ -78,6 +78,7 @@ const App: React.FC = () => {
   const [selectedDealId, setSelectedDealId] = useState<string | null>(null);
   const [isFocusMode, setIsFocusMode] = useState(false);
   const [notification, setNotification] = useState<string | null>(null);
+  const [recentlyAddedDealId, setRecentlyAddedDealId] = useState<string | null>(null);
 
   useEffect(() => {
     const { activeTask, ...persistentState } = state;
@@ -116,20 +117,34 @@ const App: React.FC = () => {
   }, [state.sponsors, state.vault]);
 
   const startDiscoveryAgent = useCallback(async (description: string, location: string, radius: string, depth: 'STANDARD' | 'DEEP', coords?: {latitude: number, longitude: number}) => {
-    setState(prev => ({ 
-      ...prev, 
-      activeTask: { status: 'SEARCHING', phase: 'Initializing Agent...', query: description, location } 
+    setState(prev => ({
+      ...prev,
+      activeTask: {
+        status: 'SEARCHING',
+        phase: depth === 'DEEP' ? 'Deep Scan: Initializing Gemini + Apollo.io...' : 'Initializing Agent...',
+        query: description,
+        location
+      }
     }));
 
     try {
-      const results = await discoverProspects(
-        description, 
-        location, 
-        { whoWeAre: state.senderProfile.orgName, role: state.senderProfile.role || 'Agent', targetGoal: state.senderProfile.goal },
-        radius, 
-        depth,
-        coords
-      );
+      // Choose between Standard Scan (Gemini only) or Deep Scan (Gemini + Apollo)
+      const results = depth === 'DEEP'
+        ? await discoverProspectsDeepScan(
+            description,
+            location,
+            { whoWeAre: state.senderProfile.orgName, role: state.senderProfile.role || 'Agent', targetGoal: state.senderProfile.goal },
+            radius,
+            coords
+          )
+        : await discoverProspects(
+            description,
+            location,
+            { whoWeAre: state.senderProfile.orgName, role: state.senderProfile.role || 'Agent', targetGoal: state.senderProfile.goal },
+            radius,
+            depth,
+            coords
+          );
       
       const leadsWithIds = results.map((r: any) => ({
         ...r,
@@ -163,17 +178,26 @@ const App: React.FC = () => {
   const handleAddSponsor = (sponsorData: Omit<Sponsor, 'id'>, dealData: Omit<Deal, 'id' | 'sponsorId'>) => {
     const sponsorId = `sp_${Date.now()}`;
     const dealId = `dl_${Date.now()}`;
-    
+
     setState(prev => ({
       ...prev,
       sponsors: [...prev.sponsors, { ...sponsorData, id: sponsorId }],
       deals: [...prev.deals, { ...dealData, id: dealId, sponsorId, currentSequenceStep: 1 }],
       activities: [
-        ...prev.activities, 
+        ...prev.activities,
         { id: `act_${Date.now()}`, dealId, type: 'NOTE', content: 'Lead incorporated', date: new Date().toISOString() }
       ],
     }));
-    showNotification(`${sponsorData.companyName} Added to Board`);
+
+    // AUTO-NAVIGATION: Switch to Pipeline and highlight new deal
+    setRecentlyAddedDealId(dealId);
+    setActiveTab('board');
+    showNotification(`${sponsorData.companyName} added to Pipeline — Opening Board View`);
+
+    // Clear highlight after 5 seconds
+    setTimeout(() => {
+      setRecentlyAddedDealId(null);
+    }, 5000);
   };
 
   const syncForensicDossierFromLead = useCallback((updatedLead: DiscoveredLead) => {
@@ -293,6 +317,14 @@ const App: React.FC = () => {
       ...prev,
       sponsors: prev.sponsors.map(s => s.id === sponsorId ? { ...s, ...updates } : s)
     }));
+  };
+
+  const handleUpdateDeal = (dealId: string, updates: Partial<Deal>) => {
+    setState(prev => ({
+      ...prev,
+      deals: prev.deals.map(d => d.id === dealId ? { ...d, ...updates } : d)
+    }));
+    showNotification('Follow-up plan saved');
   };
 
   const handleRemoveDeal = (dealId: string) => {
@@ -420,6 +452,8 @@ const App: React.FC = () => {
             onClearSession={() => setState(prev => ({ ...prev, currentDiscoveryLeads: [], activeTask: { status: 'IDLE', phase: '' } }))}
             processedIds={processedKeys}
             onLeadVerified={syncForensicDossierFromLead}
+            senderProfile={state.senderProfile}
+            onUpdateSenderProfile={handleUpdateSenderProfile}
           />
         )}
 
@@ -434,7 +468,13 @@ const App: React.FC = () => {
         )}
 
         {activeTab === 'board' && (
-          <PipelineBoard state={state} onUpdateStage={handleUpdateStage} onSelectDeal={setSelectedDealId} />
+          <PipelineBoard
+            state={state}
+            onUpdateStage={handleUpdateStage}
+            onSelectDeal={setSelectedDealId}
+            highlightDealId={recentlyAddedDealId}
+            onNavigateBack={() => setActiveTab('extract')}
+          />
         )}
 
         {activeTab === 'insights' && (
@@ -498,13 +538,14 @@ const App: React.FC = () => {
       )}
 
       {selectedDeal && selectedSponsor && (
-        <DealDetail 
+        <DealDetail
           deal={selectedDeal}
           sponsor={selectedSponsor}
           activities={dealActivities}
           onClose={() => setSelectedDealId(null)}
           onUpdateStage={handleUpdateStage}
           onLogActivity={handleLogActivity}
+          onUpdateDeal={handleUpdateDeal}
           onUpdateSponsor={handleUpdateSponsor}
           onRemoveDeal={handleRemoveDeal}
           automationSettings={state.automationSettings}

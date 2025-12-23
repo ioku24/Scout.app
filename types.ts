@@ -242,3 +242,99 @@ export interface SocialMessage {
   suggestedAction: string;
   sourceUrl?: string;
 }
+
+// ============================================================================
+// Apollo.io API Types for Deep Scan Enrichment
+// ============================================================================
+
+/**
+ * Apollo.io Organization data structure
+ */
+export interface ApolloOrganization {
+  id?: string;
+  name?: string;
+  website_url?: string;
+  primary_domain?: string;
+  primary_phone?: {
+    number?: string;
+    sanitized_number?: string;
+  };
+  phone?: string;
+  linkedin_url?: string;
+  facebook_url?: string;
+  twitter_url?: string;
+  industries?: string[];
+  industry?: string;
+  keywords?: string[];
+  estimated_num_employees?: number;
+  annual_revenue?: number;
+  annual_revenue_printed?: string;
+  city?: string;
+  state?: string;
+  country?: string;
+  street_address?: string;
+  postal_code?: string;
+  founded_year?: number;
+  short_description?: string;
+  logo_url?: string;
+}
+
+/**
+ * Apollo.io Person/Contact data structure
+ */
+export interface ApolloPerson {
+  id?: string;
+  first_name?: string;
+  last_name?: string;
+  name?: string;
+  title?: string;
+  email?: string;
+  email_status?: string;
+  phone_numbers?: Array<{
+    raw_number?: string;
+    sanitized_number?: string;
+    type?: string;
+  }>;
+  linkedin_url?: string;
+  twitter_url?: string;
+  facebook_url?: string;
+  organization?: ApolloOrganization;
+  organization_id?: string;
+  organization_name?: string;
+  seniority?: string;
+  departments?: string[];
+  employment_history?: Array<{
+    title?: string;
+    organization_name?: string;
+    start_date?: string;
+    end_date?: string;
+  }>;
+}
+
+/**
+ * Combined enrichment result from Apollo.io
+ */
+export interface ApolloEnrichmentResult {
+  organization?: ApolloOrganization;
+  people?: ApolloPerson[];
+  success: boolean;
+  error?: string;
+  creditsUsed?: number;
+}
+
+/**
+ * Apollo.io API response wrapper
+ */
+export interface ApolloApiResponse<T> {
+  organization?: T;
+  organizations?: T[];
+  people?: ApolloPerson[];
+  pagination?: {
+    page: number;
+    per_page: number;
+    total_entries: number;
+    total_pages: number;
+  };
+  error?: string;
+  message?: string;
+}

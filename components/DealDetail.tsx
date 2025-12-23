@@ -209,14 +209,17 @@ const DealDetail: React.FC<DealDetailProps> = ({
       X: isSelected ? "bg-slate-900 text-white border-transparent dark:bg-white dark:text-slate-900" : "bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white border-slate-200 dark:border-slate-700"
     };
 
-    const availability = hasLink ? "" : "opacity-20 grayscale pointer-events-none";
+    // Don't render button at all if platform link doesn't exist
+    if (!hasLink) {
+      return null;
+    }
 
     return (
-      <button 
-        key={platform} 
-        disabled={isGenerating !== false || !hasLink}
-        onClick={() => handleGenerate(platform)} 
-        className={`${baseStyle} ${(colors as any)[platform]} ${isGenerating !== false && !isGeneratingThis ? 'opacity-30' : 'hover:scale-110 active:scale-95'} ${availability}`}
+      <button
+        key={platform}
+        disabled={isGenerating !== false}
+        onClick={() => handleGenerate(platform)}
+        className={`${baseStyle} ${(colors as any)[platform]} ${isGenerating !== false && !isGeneratingThis ? 'opacity-30' : 'hover:scale-110 active:scale-95'}`}
       >
         {isGeneratingThis ? (
           <svg className="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"/></svg>
@@ -345,12 +348,66 @@ const DealDetail: React.FC<DealDetailProps> = ({
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">Next Follow-up</label>
-                  <input 
-                    type="date"
-                    value={nextFollowUp}
-                    onChange={(e) => setNextFollowUp(e.target.value)}
-                    className="w-full h-12 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl px-4 text-xs font-bold text-slate-900 dark:text-white outline-none focus:border-blue-500 transition-all"
-                  />
+
+                  {/* Quick-set Buttons */}
+                  <div className="flex gap-2 flex-wrap mb-2">
+                    {[
+                      { label: 'Tomorrow', value: 'tomorrow' },
+                      { label: '3 Days', value: '3days' },
+                      { label: 'Next Week', value: 'week' },
+                      { label: '2 Weeks', value: '2weeks' },
+                      { label: '1 Month', value: 'month' }
+                    ].map(preset => {
+                      const getQuickDate = (type: string): string => {
+                        const today = new Date();
+                        const offsets: Record<string, number> = {
+                          tomorrow: 1,
+                          '3days': 3,
+                          week: 7,
+                          '2weeks': 14,
+                          month: 30
+                        };
+                        today.setDate(today.getDate() + offsets[type]);
+                        return today.toISOString().split('T')[0];
+                      };
+
+                      const isSelected = nextFollowUp === getQuickDate(preset.value);
+
+                      return (
+                        <button
+                          key={preset.value}
+                          type="button"
+                          onClick={() => setNextFollowUp(getQuickDate(preset.value))}
+                          className={`px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all ${
+                            isSelected
+                              ? 'bg-blue-600 text-white border border-blue-600 shadow-md'
+                              : 'bg-slate-50 dark:bg-slate-900 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700 hover:border-blue-400'
+                          }`}
+                        >
+                          {preset.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {/* Custom Date Picker (Fallback) */}
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="date"
+                      value={nextFollowUp}
+                      onChange={(e) => setNextFollowUp(e.target.value)}
+                      className="flex-1 h-10 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-3 text-xs font-bold text-slate-900 dark:text-white outline-none focus:border-blue-500 transition-all"
+                    />
+                    {nextFollowUp && (
+                      <button
+                        type="button"
+                        onClick={() => setNextFollowUp('')}
+                        className="px-3 h-10 text-[9px] font-black text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-xl transition-all"
+                      >
+                        Clear
+                      </button>
+                    )}
+                  </div>
                 </div>
                 <div className="space-y-2">
                   <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">Intent Note</label>
