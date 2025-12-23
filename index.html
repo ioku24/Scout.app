@@ -14,6 +14,16 @@
                         brand: {
                             blue: '#2563EB',
                         }
+                    },
+                    animation: {
+                        'pulse-slow': 'pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+                        'shimmer': 'shimmer 2s linear infinite',
+                    },
+                    keyframes: {
+                        shimmer: {
+                            '0%': { backgroundPosition: '-1000px 0' },
+                            '100%': { backgroundPosition: '1000px 0' },
+                        }
                     }
                 }
             }
@@ -87,6 +97,21 @@
             to { opacity: 1; transform: translateY(0); }
         }
 
+        .shimmer-effect {
+            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.05), transparent);
+            background-size: 200% 100%;
+            animation: shimmer 2s infinite;
+        }
+
+        .dark .shimmer-effect {
+            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.02), transparent);
+        }
+
+        @keyframes shimmer {
+            0% { background-position: -200% 0; }
+            100% { background-position: 200% 0; }
+        }
+
         .label-caps {
             font-size: 10px;
             font-weight: 800;
@@ -94,12 +119,6 @@
             letter-spacing: 0.15em;
             color: var(--text-label);
         }
-
-        /* Override some Tailwind classes to use variables for theme compatibility */
-        .theme-bg-page { background-color: var(--page-bg); }
-        .theme-bg-card { background-color: var(--card-surface); }
-        .theme-text-main { color: var(--text-main); }
-        .theme-border { border-color: var(--border-color); }
 
         ::-webkit-scrollbar {
             width: 8px;
@@ -129,6 +148,5 @@
 </head>
 <body>
     <div id="root"></div>
-      <script type="module" src="/index.tsx"></script>
 </body>
 </html>

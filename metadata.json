@@ -3,6 +3,7 @@
   "description": "Integrated Forensic CRM. Intercepting social streams, mapping identity DNA, and accelerating sponsorship growth through AI-powered triage.",
   "requestFramePermissions": [
     "camera",
-    "microphone"
+    "microphone",
+    "geolocation"
   ]
 }

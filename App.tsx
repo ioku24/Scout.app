@@ -1,61 +1,91 @@
-
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { AppState, Sponsor, Deal, PipelineStage, DiscoveredLead, DiscoverySession, AgentTask, AutomationSettings } from './types';
-import Dashboard from './components/Dashboard';
-import PipelineBoard from './components/PipelineBoard';
-import DiscoveryTab from './components/DiscoveryTab';
-import FocusMode from './components/FocusMode';
-import SponsorForm from './components/SponsorForm';
-import DealDetail from './components/DealDetail';
-import { discoverProspects } from './lib/gemini';
+import { AppState, Sponsor, Deal, PipelineStage, DiscoveredLead, DiscoverySession, AgentTask, AutomationSettings, Workflow, SocialMessage, SocialAccount, SenderProfile, ForensicDossier } from './types.ts';
+import Dashboard from './components/Dashboard.tsx';
+import PipelineBoard from './components/PipelineBoard.tsx';
+import DiscoveryTab from './components/DiscoveryTab.tsx';
+import FocusMode from './components/FocusMode.tsx';
+import SponsorForm from './components/SponsorForm.tsx';
+import DealDetail from './components/DealDetail.tsx';
+import WorkflowBuilder from './components/WorkflowBuilder.tsx';
+import SocialInbox from './components/SocialInbox.tsx';
+import { discoverProspects, getIdentityKeys } from './lib/gemini.ts';
 
-const STORAGE_KEY = 'scout_crm_v4_final_auto';
+const STORAGE_KEY = 'scout_crm_v4_final_auto_v5';
+const CURRENT_STATE_VERSION = 1;
+
+const migrateState = (payload: any): AppState => {
+  if (!payload || !payload.stateVersion) return payload;
+  return payload.state;
+};
 
 const App: React.FC = () => {
   const [state, setState] = useState<AppState>(() => {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      return {
-        ...parsed,
-        theme: parsed.theme || 'light',
-        activeTask: { status: 'IDLE', phase: '' },
-        automationSettings: parsed.automationSettings || {
+    let baseState: any = null;
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      const parsed = saved ? JSON.parse(saved) : null;
+      baseState = parsed ? migrateState(parsed) : null;
+    } catch (e) {
+      console.warn("Failed to hydrate state from storage:", e);
+    }
+
+    if (!baseState) {
+      baseState = {
+        sponsors: [],
+        deals: [],
+        activities: [],
+        vault: [],
+        discoveryHistory: [],
+        currentDiscoveryLeads: [],
+        workflows: [],
+        socialMessages: [],
+        socialAccounts: [
+          { platform: 'INSTAGRAM', isConnected: true, username: 'scout_hq' },
+          { platform: 'LINKEDIN', isConnected: false, username: '' }
+        ],
+        senderProfile: {
+          orgName: "My organization",
+          role: "",
+          goal: "looking to connect with high-fit partners",
+          offerOneLiner: "we offer a mutually beneficial partnership",
+          ctaStyle: "quick_chat"
+        },
+        automationSettings: {
           n8nWebhookUrl: '',
           autoSignalRefresh: false,
           notifyOnDeploy: true,
           agentFrequency: 'DAILY'
-        }
+        },
+        theme: 'light'
       };
     }
+
     return {
-      sponsors: [],
-      deals: [],
-      activities: [],
-      vault: [],
-      discoveryHistory: [],
-      currentDiscoveryLeads: [],
-      activeTask: { status: 'IDLE', phase: '' },
-      automationSettings: {
-        n8nWebhookUrl: '',
-        autoSignalRefresh: false,
-        notifyOnDeploy: true,
-        agentFrequency: 'DAILY'
+      ...baseState,
+      senderProfile: baseState.senderProfile || {
+        orgName: "My organization",
+        role: "",
+        goal: "looking to connect with high-fit partners",
+        offerOneLiner: "we offer a mutually beneficial partnership",
+        ctaStyle: "quick_chat"
       },
-      theme: 'light'
-    };
+      activeTask: { status: 'IDLE', phase: '' }
+    } as AppState;
   });
 
-  const [activeTab, setActiveTab] = useState<'extract' | 'board' | 'insights' | 'storage'>('extract');
-  const [storageSubTab, setStorageSubTab] = useState<'PARTNERS' | 'VAULT'>('PARTNERS');
+  const [activeTab, setActiveTab] = useState<'extract' | 'signals' | 'board' | 'insights' | 'flows' | 'storage'>('extract');
   const [isAddingSponsor, setIsAddingSponsor] = useState(false);
   const [selectedDealId, setSelectedDealId] = useState<string | null>(null);
   const [isFocusMode, setIsFocusMode] = useState(false);
   const [notification, setNotification] = useState<string | null>(null);
 
   useEffect(() => {
-    const { activeTask, ...saveableState } = state;
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(saveableState));
+    const { activeTask, ...persistentState } = state;
+    const payload = {
+      stateVersion: CURRENT_STATE_VERSION,
+      state: persistentState
+    };
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
   }, [state]);
 
   useEffect(() => {
@@ -78,30 +108,27 @@ const App: React.FC = () => {
     setTimeout(() => setNotification(null), 3000);
   };
 
-  const startDiscoveryAgent = useCallback(async (description: string, location: string, radius: string, depth: 'STANDARD' | 'DEEP') => {
+  const processedKeys = useMemo(() => {
+    const keys = new Set<string>();
+    state.sponsors.forEach(s => getIdentityKeys(s).forEach(k => keys.add(k)));
+    state.vault.forEach(v => getIdentityKeys(v).forEach(k => keys.add(k)));
+    return Array.from(keys);
+  }, [state.sponsors, state.vault]);
+
+  const startDiscoveryAgent = useCallback(async (description: string, location: string, radius: string, depth: 'STANDARD' | 'DEEP', coords?: {latitude: number, longitude: number}) => {
     setState(prev => ({ 
       ...prev, 
       activeTask: { status: 'SEARCHING', phase: 'Initializing Agent...', query: description, location } 
     }));
 
-    const phases = ['Scanning local clusters...', 'Validating contact nodes...', 'Mapping social handles...', 'Finalizing match DNA...'];
-    let phaseIdx = 0;
-    
-    const interval = setInterval(() => {
-      setState(prev => ({
-        ...prev,
-        activeTask: { ...prev.activeTask, phase: phases[phaseIdx % phases.length] }
-      }));
-      phaseIdx++;
-    }, 2500);
-
     try {
       const results = await discoverProspects(
         description, 
         location, 
-        { whoWeAre: 'Organization', role: 'Agent', targetGoal: 'Partnership' },
+        { whoWeAre: state.senderProfile.orgName, role: state.senderProfile.role || 'Agent', targetGoal: state.senderProfile.goal },
         radius, 
-        depth
+        depth,
+        coords
       );
       
       const leadsWithIds = results.map((r: any) => ({
@@ -113,6 +140,8 @@ const App: React.FC = () => {
         id: `sess_${Date.now()}`,
         query: description,
         location,
+        radius,
+        depth,
         date: new Date().toISOString(),
         leads: leadsWithIds
       };
@@ -124,32 +153,146 @@ const App: React.FC = () => {
         activeTask: { status: 'COMPLETED', phase: 'Extraction Complete' }
       }));
       
-      showNotification(`Agent found ${leadsWithIds.length} leads`);
+      showNotification(`Agent found ${leadsWithIds.length} leads with Maps grounding.`);
     } catch (error) {
+      console.error(error);
       setState(prev => ({ ...prev, activeTask: { status: 'ERROR', phase: 'Agent encountered an error' } }));
-    } finally {
-      clearInterval(interval);
     }
-  }, []);
+  }, [state.senderProfile]);
 
   const handleAddSponsor = (sponsorData: Omit<Sponsor, 'id'>, dealData: Omit<Deal, 'id' | 'sponsorId'>) => {
     const sponsorId = `sp_${Date.now()}`;
     const dealId = `dl_${Date.now()}`;
+    
     setState(prev => ({
       ...prev,
       sponsors: [...prev.sponsors, { ...sponsorData, id: sponsorId }],
       deals: [...prev.deals, { ...dealData, id: dealId, sponsorId, currentSequenceStep: 1 }],
-      activities: [...prev.activities, { id: `act_${Date.now()}`, dealId, type: 'NOTE', content: 'Prospect incorporated into pipeline.', date: new Date().toISOString() }]
+      activities: [
+        ...prev.activities, 
+        { id: `act_${Date.now()}`, dealId, type: 'NOTE', content: 'Lead incorporated', date: new Date().toISOString() }
+      ],
     }));
     showNotification(`${sponsorData.companyName} Added to Board`);
   };
 
-  const handleSaveToVault = (lead: DiscoveredLead) => {
+  const syncForensicDossierFromLead = useCallback((updatedLead: DiscoveredLead) => {
+    setState(prev => {
+      const updatedDeals = prev.deals.map(deal => {
+        if (deal.forensicDossier?.sourceLeadId !== updatedLead.id) {
+          return deal;
+        }
+
+        const updatedDossier: ForensicDossier = {
+          sourceLeadId: updatedLead.id,
+          verificationStatus: updatedLead.verificationStatus,
+          verificationReasoning: updatedLead.verificationReasoning,
+          forensicAuditTrail: updatedLead.forensicAuditTrail ?? [],
+          createdAt: deal.forensicDossier?.createdAt ?? new Date().toISOString(),
+        };
+
+        return {
+          ...deal,
+          forensicDossier: updatedDossier
+        };
+      });
+
+      const updatedSponsors = prev.sponsors.map(sponsor => {
+        // Find if this sponsor belongs to a deal being updated
+        const associatedDeal = updatedDeals.find(d => d.sponsorId === sponsor.id && d.forensicDossier?.sourceLeadId === updatedLead.id);
+        if (!associatedDeal) return sponsor;
+
+        return {
+          ...sponsor,
+          website: updatedLead.website || sponsor.website,
+          email: updatedLead.email || sponsor.email,
+          socialLinks: {
+            ...sponsor.socialLinks,
+            ...updatedLead.socialLinks
+          }
+        };
+      });
+
+      return {
+        ...prev,
+        deals: updatedDeals,
+        sponsors: updatedSponsors
+      };
+    });
+    showNotification(`Forensic sync complete for ${updatedLead.companyName}`);
+  }, []);
+
+  const handleIncorporateSignal = (message: SocialMessage) => {
+    const sponsorData: Omit<Sponsor, 'id'> = {
+      companyName: message.senderName,
+      contactName: message.senderName,
+      email: '',
+      industry: 'Social Lead',
+      socialLinks: { 
+        instagram: message.platform === 'INSTAGRAM' ? `https://instagram.com/${message.senderHandle}` : undefined,
+        linkedIn: message.platform === 'LINKEDIN' ? message.senderHandle : undefined
+      },
+      latestSignal: message.content,
+      primarySignalSource: message.platform
+    };
+
+    const dealData: Omit<Deal, 'id' | 'sponsorId'> = {
+      stage: PipelineStage.DISCOVERY,
+      amount: 5000,
+      tier: 'Community Partner',
+      notes: `Intercepted Signal: ${message.content}`,
+      currentSequenceStep: 1
+    };
+
+    handleAddSponsor(sponsorData, dealData);
     setState(prev => ({
       ...prev,
-      vault: [...prev.vault, { ...lead, savedAt: new Date().toISOString() }]
+      socialMessages: prev.socialMessages.map(m => m.id === message.id ? { ...m, isArchived: true } : m)
     }));
-    showNotification(`${lead.companyName} Saved to Vault`);
+  };
+
+  const handleUpdateSenderProfile = (updates: Partial<SenderProfile>) => {
+    setState(prev => ({
+      ...prev,
+      senderProfile: { ...prev.senderProfile, ...updates }
+    }));
+  };
+
+  const handleAddIntercept = (msg: SocialMessage) => {
+    setState(prev => ({
+      ...prev,
+      socialMessages: [msg, ...prev.socialMessages]
+    }));
+    showNotification(`New Signal Found for ${msg.senderName}`);
+  };
+
+  const handleUpdateAutomation = (settings: Partial<AutomationSettings>) => {
+    setState(prev => ({
+      ...prev,
+      automationSettings: { ...prev.automationSettings, ...settings }
+    }));
+    showNotification('Automation Gateway Updated');
+  };
+
+  const handleLogActivity = (dealId: string, type: 'EMAIL' | 'DM' | 'CALL' | 'NOTE', content: string) => {
+    setState(prev => ({
+      ...prev,
+      activities: [...prev.activities, { id: `act_${Date.now()}`, dealId, type, content, date: new Date().toISOString() }]
+    }));
+  };
+
+  const handleUpdateStage = (dealId: string, newStage: PipelineStage) => {
+    setState(prev => ({
+      ...prev,
+      deals: prev.deals.map(d => d.id === dealId ? { ...d, stage: newStage } : d)
+    }));
+  };
+
+  const handleUpdateSponsor = (sponsorId: string, updates: Partial<Sponsor>) => {
+    setState(prev => ({
+      ...prev,
+      sponsors: prev.sponsors.map(s => s.id === sponsorId ? { ...s, ...updates } : s)
+    }));
   };
 
   const handleRemoveDeal = (dealId: string) => {
@@ -164,19 +307,12 @@ const App: React.FC = () => {
       };
     });
     setSelectedDealId(null);
-    showNotification('Deal archived and removed.');
-  };
-
-  const handleUpdateAutomation = (settings: Partial<AutomationSettings>) => {
-    setState(prev => ({
-      ...prev,
-      automationSettings: { ...prev.automationSettings, ...settings }
-    }));
-    showNotification('Automation Gateway Updated');
+    showNotification('Deal archived.');
   };
 
   const selectedDeal = useMemo(() => state.deals.find(d => d.id === selectedDealId), [state.deals, selectedDealId]);
   const selectedSponsor = useMemo(() => selectedDeal ? state.sponsors.find(s => s.id === selectedDeal.sponsorId) : null, [selectedDeal, state.sponsors]);
+  const dealActivities = useMemo(() => state.activities.filter(a => a.dealId === selectedDealId), [state.activities, selectedDealId]);
 
   return (
     <div className="min-h-screen flex flex-col bg-[var(--page-bg)] text-[var(--text-main)] transition-colors duration-300">
@@ -197,18 +333,20 @@ const App: React.FC = () => {
             </div>
             <span className="font-black brand-font tracking-tight text-2xl text-slate-900 dark:text-white">SCOUT</span>
           </div>
-          <nav className="flex items-center gap-2">
+          <nav className="flex items-center gap-1">
             {[
-              { id: 'extract', label: '1. Discovery' },
-              { id: 'board', label: '2. Pipeline' },
-              { id: 'insights', label: '3. Analytics' },
-              { id: 'storage', label: '4. Vault' }
+              { id: 'extract', label: 'Extract' },
+              { id: 'signals', label: 'Signals' },
+              { id: 'board', label: 'Pipeline' },
+              { id: 'insights', label: 'Insights' },
+              { id: 'flows', label: 'Flows' },
+              { id: 'storage', label: 'Vault' }
             ].map((tab) => (
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id as any)}
-                className={`px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${
-                  activeTab === tab.id ? 'bg-[#0F172A] dark:bg-white text-white dark:text-[#0F172A] shadow-md px-8' : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'
+                className={`px-5 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${
+                  activeTab === tab.id ? 'bg-[#0F172A] dark:bg-white text-white dark:text-[#0F172A] shadow-md' : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'
                 }`}
               >
                 {tab.label}
@@ -228,87 +366,162 @@ const App: React.FC = () => {
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"/></svg>
             )}
           </button>
-
-          <button onClick={() => setIsAddingSponsor(true)} className="px-6 py-2.5 bg-slate-50 dark:bg-slate-800 border border-[#CBD5E1] dark:border-slate-700 text-slate-900 dark:text-white rounded-xl text-[10px] font-black tracking-widest uppercase hover:bg-white dark:hover:bg-slate-700 hover:border-slate-400 transition-all active:scale-95">
-            Quick Add
-          </button>
-          <button onClick={() => setIsFocusMode(true)} className="bg-[#2563EB] text-white font-black px-7 py-2.5 rounded-xl text-[10px] tracking-[0.2em] uppercase hover:bg-[#1D4ED8] transition-all shadow-lg shadow-[#2563EB]/20 active:scale-95">
+          
+          <button 
+            onClick={() => setIsFocusMode(true)}
+            className="px-6 py-2.5 bg-[#2563EB] text-white rounded-xl text-[10px] font-black tracking-widest uppercase hover:bg-blue-700 shadow-lg shadow-blue-500/20 active:scale-95 transition-all"
+          >
             Power Mode
           </button>
         </div>
       </header>
 
-      <main className="flex-grow w-full max-w-[1600px] mx-auto p-10">
+      <main className="flex-grow p-10 overflow-y-auto">
         {activeTab === 'extract' && (
           <DiscoveryTab 
             currentLeads={state.currentDiscoveryLeads}
             onUpdateLeads={(leads) => setState(prev => ({ ...prev, currentDiscoveryLeads: leads }))}
-            onAddAsLead={(l) => handleAddSponsor({
-              companyName: l.companyName, industry: 'Discovery', contactName: 'Lead Contact', email: l.email || '', phone: l.phone || '', address: l.address, website: l.website, socialLinks: l.socialLinks
-            }, { stage: PipelineStage.DISCOVERY, amount: 5000, tier: 'New Prospect', notes: l.matchReasoning, currentSequenceStep: 1 })} 
-            onSaveToVault={handleSaveToVault}
+            onAddAsLead={(lead) => {
+              const forensicDossier: ForensicDossier = {
+                sourceLeadId: lead.id,
+                verificationStatus: lead.verificationStatus,
+                verificationReasoning: lead.verificationReasoning,
+                forensicAuditTrail: lead.forensicAuditTrail ?? [],
+                createdAt: new Date().toISOString(),
+              };
+
+              handleAddSponsor(
+                { 
+                  companyName: lead.companyName, 
+                  contactName: '', 
+                  email: lead.email || '', 
+                  phone: lead.phone || '', 
+                  industry: 'Discovery Match',
+                  website: lead.website,
+                  socialLinks: lead.socialLinks,
+                  address: lead.address,
+                  latestSignal: lead.latestSignal,
+                  primarySignalSource: 'Discovery Agent'
+                },
+                { 
+                  stage: PipelineStage.DISCOVERY, 
+                  amount: 2500, 
+                  tier: 'Prospect', 
+                  notes: lead.matchReasoning, 
+                  currentSequenceStep: 1,
+                  forensicDossier
+                }
+              );
+            }}
+            onSaveToVault={(lead) => setState(prev => ({ ...prev, vault: [...prev.vault, { ...lead, savedAt: new Date().toISOString() }] }))}
             onStartSearch={startDiscoveryAgent}
             activeTask={state.activeTask}
             history={state.discoveryHistory}
+            onClearSession={() => setState(prev => ({ ...prev, currentDiscoveryLeads: [], activeTask: { status: 'IDLE', phase: '' } }))}
+            processedIds={processedKeys}
+            onLeadVerified={syncForensicDossierFromLead}
           />
         )}
-        {activeTab === 'insights' && <Dashboard state={state} onUpdateAutomation={handleUpdateAutomation} />}
-        {activeTab === 'board' && <PipelineBoard state={state} onUpdateStage={(id, stage) => setState(prev => ({ ...prev, deals: prev.deals.map(d => d.id === id ? { ...d, stage } : d) }))} onSelectDeal={setSelectedDealId} />}
+
+        {activeTab === 'signals' && (
+          <SocialInbox 
+            accounts={state.socialAccounts}
+            messages={state.socialMessages.filter(m => !m.isArchived)}
+            onConnect={(p) => setState(prev => ({ ...prev, socialAccounts: prev.socialAccounts.map(a => a.platform === p ? { ...a, isConnected: true, username: 'scout_synced' } : a) }))}
+            onConvert={handleIncorporateSignal}
+            onAddIntercept={handleAddIntercept}
+          />
+        )}
+
+        {activeTab === 'board' && (
+          <PipelineBoard state={state} onUpdateStage={handleUpdateStage} onSelectDeal={setSelectedDealId} />
+        )}
+
+        {activeTab === 'insights' && (
+          <Dashboard state={state} onUpdateAutomation={handleUpdateAutomation} onNavigateToFlows={() => setActiveTab('flows')} />
+        )}
+
+        {activeTab === 'flows' && (
+          <WorkflowBuilder 
+            workflows={state.workflows} 
+            onSave={(wf) => setState(prev => ({ ...prev, workflows: prev.workflows.map(w => w.id === wf.id ? wf : w).concat(prev.workflows.find(w => w.id === wf.id) ? [] : [wf]) }))}
+            onDelete={(id) => setState(prev => ({ ...prev, workflows: prev.workflows.filter(w => w.id !== id) }))}
+          />
+        )}
+
         {activeTab === 'storage' && (
-          <div className="space-y-6 animate-fade-in">
-             <div className="flex items-center gap-4 bg-white dark:bg-slate-900 p-2 rounded-2xl border border-slate-200 dark:border-slate-800 w-fit shadow-sm">
-                <button onClick={() => setStorageSubTab('PARTNERS')} className={`px-8 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${storageSubTab === 'PARTNERS' ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-900 shadow-lg' : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'}`}>Partners</button>
-                <button onClick={() => setStorageSubTab('VAULT')} className={`px-8 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${storageSubTab === 'VAULT' ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-900 shadow-lg' : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'}`}>Vault ({state.vault.length})</button>
-             </div>
-             <div className="bg-white dark:bg-slate-900 rounded-[2rem] border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
-                {storageSubTab === 'PARTNERS' ? (
-                  <table className="w-full text-left">
-                    <thead className="bg-slate-50/50 dark:bg-slate-800/50 border-b border-slate-200 dark:border-slate-800">
-                      <tr>
-                        <th className="px-10 py-5 text-[10px] font-black text-slate-500 uppercase tracking-widest">Company</th>
-                        <th className="px-10 py-5 text-[10px] font-black text-slate-500 uppercase tracking-widest">Email</th>
-                        <th className="px-10 py-5 text-[10px] font-black text-slate-500 uppercase tracking-widest">Action</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                      {state.sponsors.map(sponsor => (
-                        <tr key={sponsor.id} className="group hover:bg-slate-50/80 dark:hover:bg-slate-800/50 transition-colors">
-                          <td className="px-10 py-6">
-                            <p className="font-bold text-slate-900 dark:text-white uppercase brand-font tracking-tight">{sponsor.companyName}</p>
-                            <p className="text-[9px] font-bold text-slate-400 uppercase">{sponsor.website}</p>
-                          </td>
-                          <td className="px-10 py-6"><span className="text-sm font-bold text-slate-700 dark:text-slate-300">{sponsor.email || '—'}</span></td>
-                          <td className="px-10 py-6"><button onClick={() => { const deal = state.deals.find(d => d.sponsorId === sponsor.id); if (deal) setSelectedDealId(deal.id); }} className="text-[#2563EB] font-black text-[10px] tracking-widest uppercase hover:underline">View Dossier</button></td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                ) : (
-                  <div className="p-8">
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                      {state.vault.map(lead => (
-                        <div key={lead.id} className="p-6 border border-slate-100 dark:border-slate-800 rounded-3xl bg-slate-50/30 dark:bg-slate-800/30 flex flex-col justify-between shadow-sm">
-                          <div>
-                            <div className="flex justify-between items-start mb-4">
-                              <h4 className="text-lg font-black uppercase brand-font text-slate-900 dark:text-white tracking-tight">{lead.companyName}</h4>
-                            </div>
-                            <p className="text-[10px] text-slate-500 uppercase font-extrabold mb-4 tracking-widest">{lead.website}</p>
-                            <p className="text-xs text-slate-600 dark:text-slate-400 font-medium italic leading-relaxed mb-6 border-l-4 border-slate-200 dark:border-slate-700 pl-4">"{lead.matchReasoning}"</p>
-                          </div>
-                          <button onClick={() => { handleAddSponsor({ companyName: lead.companyName, industry: 'Vaulted', contactName: 'Lead', email: lead.email || '', website: lead.website, socialLinks: lead.socialLinks }, { stage: PipelineStage.DISCOVERY, amount: 5000, tier: 'Vaulted Lead', notes: lead.matchReasoning, currentSequenceStep: 1 }); setState(prev => ({ ...prev, vault: prev.vault.filter(v => v.id !== lead.id) })); }} className="w-full py-4 bg-slate-900 dark:bg-white text-white dark:text-slate-900 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-blue-600 transition-all shadow-md">Add to Pipeline</button>
-                        </div>
-                      ))}
+          <div className="space-y-12 animate-fade-in max-w-[1400px] mx-auto">
+             <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+               {state.vault.map(v => (
+                 <div key={v.id} className="bg-white dark:bg-slate-900 p-10 rounded-[2.5rem] border border-slate-100 dark:border-slate-800 shadow-sm flex flex-col justify-between group transition-colors">
+                    <div>
+                      <div className="flex justify-between items-start mb-6">
+                        <h4 className="text-3xl font-black text-slate-900 dark:text-white brand-font uppercase tracking-tight">{v.companyName}</h4>
+                        <span className="text-[10px] font-black text-slate-300 dark:text-slate-600 uppercase tracking-widest">Saved {new Date(v.savedAt || '').toLocaleDateString()}</span>
+                      </div>
+                      <p className="text-sm font-medium text-slate-600 dark:text-slate-400 leading-relaxed mb-8">{v.matchReasoning}</p>
                     </div>
-                  </div>
-                )}
+                    <div className="flex gap-4">
+                      <button 
+                        onClick={() => {
+                          setState(prev => ({ ...prev, vault: prev.vault.filter(item => item.id !== v.id) }));
+                          handleAddSponsor(
+                            { companyName: v.companyName, contactName: '', email: v.email || '', industry: 'From Vault', website: v.website, socialLinks: v.socialLinks, address: v.address, latestSignal: v.latestSignal, primarySignalSource: 'Vault' },
+                            { stage: PipelineStage.DISCOVERY, amount: 1000, tier: 'Vault Prospect', notes: 'Pulled from cold vault.', currentSequenceStep: 1 }
+                          );
+                        }}
+                        className="flex-grow py-4 bg-blue-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-blue-700 transition-all shadow-lg shadow-blue-500/10"
+                      >
+                        Push to Board
+                      </button>
+                      <button 
+                        onClick={() => setState(prev => ({ ...prev, vault: prev.vault.filter(item => item.id !== v.id) }))}
+                        className="px-8 py-4 bg-slate-50 dark:bg-slate-800 text-red-500 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-red-50 dark:hover:bg-red-900/20 transition-all"
+                      >
+                        Delete
+                      </button>
+                    </div>
+                 </div>
+               ))}
+               {state.vault.length === 0 && (
+                 <div className="col-span-full py-40 text-center opacity-20">
+                    <p className="text-[12px] font-black uppercase tracking-[0.5em]">The Vault is currently empty.</p>
+                 </div>
+               )}
              </div>
           </div>
         )}
       </main>
 
-      {isAddingSponsor && <SponsorForm onSave={handleAddSponsor} onClose={() => setIsAddingSponsor(false)} />}
-      {selectedDeal && selectedSponsor && <DealDetail deal={selectedDeal} sponsor={selectedSponsor} activities={state.activities.filter(a => a.dealId === selectedDealId)} onClose={() => setSelectedDealId(null)} onUpdateStage={(id, stage) => setState(prev => ({ ...prev, deals: prev.deals.map(d => d.id === id ? { ...d, stage } : d) }))} onLogActivity={(id, type, content) => setState(prev => ({ ...prev, activities: [...prev.activities, { id: `act_${Date.now()}`, dealId: id, type, content, date: new Date().toISOString() }] }))} onUpdateDeal={(id, updates) => setState(prev => ({ ...prev, deals: prev.deals.map(d => d.id === id ? { ...d, ...updates } : d) }))} onUpdateSponsor={(id, updates) => setState(prev => ({ ...prev, sponsors: prev.sponsors.map(s => s.id === id ? { ...s, ...updates } : s) }))} onRemoveDeal={handleRemoveDeal} automationSettings={state.automationSettings} />}
-      {isFocusMode && <FocusMode deals={state.deals} sponsors={state.sponsors} onLogActivity={(id, type, content) => setState(prev => ({ ...prev, activities: [...prev.activities, { id: `act_${Date.now()}`, dealId: id, type, content, date: new Date().toISOString() }] }))} onClose={() => setIsFocusMode(false)} />}
+      {isAddingSponsor && (
+        <SponsorForm onSave={handleAddSponsor} onClose={() => setIsAddingSponsor(false)} />
+      )}
+
+      {selectedDeal && selectedSponsor && (
+        <DealDetail 
+          deal={selectedDeal}
+          sponsor={selectedSponsor}
+          activities={dealActivities}
+          onClose={() => setSelectedDealId(null)}
+          onUpdateStage={handleUpdateStage}
+          onLogActivity={handleLogActivity}
+          onUpdateSponsor={handleUpdateSponsor}
+          onRemoveDeal={handleRemoveDeal}
+          automationSettings={state.automationSettings}
+          senderProfile={state.senderProfile}
+        />
+      )}
+
+      {isFocusMode && (
+        <FocusMode 
+          deals={state.deals.filter(d => d.stage === PipelineStage.DISCOVERY || d.stage === PipelineStage.OUTREACH_STARTED)}
+          sponsors={state.sponsors}
+          senderProfile={state.senderProfile}
+          onLogActivity={handleLogActivity}
+          onUpdateSenderProfile={handleUpdateSenderProfile}
+          onClose={() => setIsFocusMode(false)}
+        />
+      )}
     </div>
   );
 };

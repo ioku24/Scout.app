@@ -7,9 +7,10 @@ import { STAGE_LABELS } from '../constants';
 interface DashboardProps {
   state: AppState;
   onUpdateAutomation?: (settings: Partial<AutomationSettings>) => void;
+  onNavigateToFlows?: () => void;
 }
 
-const Dashboard: React.FC<DashboardProps> = ({ state, onUpdateAutomation }) => {
+const Dashboard: React.FC<DashboardProps> = ({ state, onUpdateAutomation, onNavigateToFlows }) => {
   const [configTarget, setConfigTarget] = useState<'N8N' | 'AGENT' | null>(null);
   const isDark = state.theme === 'dark';
   
@@ -32,16 +33,16 @@ const Dashboard: React.FC<DashboardProps> = ({ state, onUpdateAutomation }) => {
     <div className="space-y-8 animate-fade-in pb-20">
       {/* Metrics Row */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <div className="bg-white dark:bg-slate-900 p-8 rounded-[2.5rem] border border-slate-200 dark:border-slate-800 shadow-sm">
+        <div className="bg-white dark:bg-slate-900 p-8 rounded-[2.5rem] border border-slate-200 dark:border-slate-800 shadow-sm transition-colors">
           <p className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] mb-3">Gross Pipeline</p>
           <p className="text-4xl font-black text-slate-900 dark:text-white brand-font">${pipelineValue.toLocaleString()}</p>
         </div>
-        <div className="bg-white dark:bg-slate-900 p-8 rounded-[2.5rem] border border-slate-200 dark:border-slate-800 shadow-sm relative overflow-hidden">
+        <div className="bg-white dark:bg-slate-900 p-8 rounded-[2.5rem] border border-slate-200 dark:border-slate-800 shadow-sm relative overflow-hidden transition-colors">
           <div className="absolute top-0 right-0 w-24 h-24 bg-blue-500/5 blur-3xl"></div>
           <p className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] mb-3">Contracted Yield</p>
           <p className="text-4xl font-black text-blue-600 dark:text-blue-500 brand-font">${totalRevenue.toLocaleString()}</p>
         </div>
-        <div className="bg-white dark:bg-slate-900 p-8 rounded-[2.5rem] border border-slate-200 dark:border-slate-800 shadow-sm">
+        <div className="bg-white dark:bg-slate-900 p-8 rounded-[2.5rem] border border-slate-200 dark:border-slate-800 shadow-sm transition-colors">
           <p className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] mb-3">Active Ops</p>
           <p className="text-4xl font-black text-slate-900 dark:text-white brand-font">{signedDeals.length}</p>
         </div>
@@ -49,7 +50,7 @@ const Dashboard: React.FC<DashboardProps> = ({ state, onUpdateAutomation }) => {
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         {/* Chart */}
-        <div className="lg:col-span-2 bg-white dark:bg-slate-900 p-10 rounded-[3rem] border border-slate-200 dark:border-slate-800 shadow-sm">
+        <div className="lg:col-span-2 bg-white dark:bg-slate-900 p-10 rounded-[3rem] border border-slate-200 dark:border-slate-800 shadow-sm transition-colors">
           <h3 className="text-[11px] font-black text-slate-500 uppercase tracking-[0.3em] mb-10">Revenue Velocity</h3>
           <div className="w-full" style={{ height: '350px' }}>
             <ResponsiveContainer width="100%" height="100%">
@@ -67,7 +68,7 @@ const Dashboard: React.FC<DashboardProps> = ({ state, onUpdateAutomation }) => {
         </div>
 
         {/* Automation & Agentic Hub */}
-        <div className="bg-[#0F172A] dark:bg-black p-10 rounded-[3rem] text-white flex flex-col shadow-2xl relative overflow-hidden group">
+        <div className="bg-[#0F172A] dark:bg-black p-10 rounded-[3rem] text-white flex flex-col shadow-2xl relative overflow-hidden group transition-colors">
           <div className="absolute top-0 right-0 w-80 h-80 bg-blue-600/10 blur-[100px] pointer-events-none group-hover:bg-blue-600/20 transition-all duration-700"></div>
           
           <div className="flex justify-between items-center mb-10 relative z-10">
@@ -116,7 +117,7 @@ const Dashboard: React.FC<DashboardProps> = ({ state, onUpdateAutomation }) => {
             </div>
 
             {/* Event Log (Pseudo-terminal) */}
-            <div className="mt-4 p-5 bg-black/40 rounded-2xl border border-white/5 font-mono text-[9px] text-slate-500 space-y-2 max-h-[120px] overflow-hidden">
+            <div className="mt-4 p-5 bg-black/40 rounded-2xl border border-white/5 font-mono text-[9px] text-slate-500 space-y-2 max-h-[120px] overflow-hidden transition-colors">
                <p><span className="text-blue-500">PROMPT:</span> Triage Agent initialized...</p>
                <p><span className="text-emerald-500">SYNC:</span> Webhook heartbeat detected.</p>
                <p><span className="text-slate-600">IDLE:</span> Waiting for deployment event.</p>
@@ -132,9 +133,9 @@ const Dashboard: React.FC<DashboardProps> = ({ state, onUpdateAutomation }) => {
       {/* Configuration Modals */}
       {configTarget === 'N8N' && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[100] flex items-center justify-center p-6 animate-fade-in">
-          <div className="bg-white dark:bg-slate-900 w-full max-w-md rounded-[2.5rem] p-10 shadow-2xl space-y-8 border border-slate-100 dark:border-slate-800">
+          <div className="bg-white dark:bg-slate-900 w-full max-w-md rounded-[2.5rem] p-10 shadow-2xl space-y-8 border border-slate-100 dark:border-slate-800 transition-colors">
             <div>
-              <h4 className="text-2xl font-black text-slate-900 dark:text-white brand-font uppercase">n8n Configuration</h4>
+              <h4 className="text-2xl font-black text-slate-900 dark:text-white brand-font uppercase tracking-tight">n8n Gateway</h4>
               <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-2">External Webhook Gateway</p>
             </div>
             <div className="space-y-4">
@@ -164,9 +165,9 @@ const Dashboard: React.FC<DashboardProps> = ({ state, onUpdateAutomation }) => {
 
       {configTarget === 'AGENT' && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[100] flex items-center justify-center p-6 animate-fade-in">
-          <div className="bg-white dark:bg-slate-900 w-full max-w-md rounded-[2.5rem] p-10 shadow-2xl space-y-8 border border-slate-100 dark:border-slate-800">
+          <div className="bg-white dark:bg-slate-900 w-full max-w-md rounded-[2.5rem] p-10 shadow-2xl space-y-8 border border-slate-100 dark:border-slate-800 transition-colors">
             <div>
-              <h4 className="text-2xl font-black text-slate-900 dark:text-white brand-font uppercase">Agent Settings</h4>
+              <h4 className="text-2xl font-black text-slate-900 dark:text-white brand-font uppercase tracking-tight">Agent Control</h4>
               <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-2">Autonomous Intelligence Control</p>
             </div>
             <div className="space-y-6">

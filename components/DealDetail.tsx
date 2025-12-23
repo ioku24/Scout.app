@@ -1,8 +1,7 @@
-
 import React, { useState, useEffect } from 'react';
-import { Sponsor, Deal, Activity, PipelineStage, AutomationSettings } from '../types';
+import { Sponsor, Deal, Activity, PipelineStage, AutomationSettings, SenderProfile } from '../types';
 import { STAGE_COLORS, STAGE_LABELS } from '../constants';
-import { generateOutreachDraft, performDeepSignalSearch } from '../lib/gemini';
+import { generateOutreachDraft, performDeepSignalSearch, generateOutreachDrafts } from '../lib/gemini';
 
 interface DealDetailProps {
   deal: Deal;
@@ -15,17 +14,32 @@ interface DealDetailProps {
   onUpdateSponsor?: (sponsorId: string, updates: Partial<Sponsor>) => void;
   onRemoveDeal?: (dealId: string) => void;
   automationSettings?: AutomationSettings;
+  senderProfile: SenderProfile;
 }
 
 const DealDetail: React.FC<DealDetailProps> = ({ 
-  deal, sponsor, activities, onClose, onUpdateStage, onLogActivity, onUpdateDeal, onUpdateSponsor, onRemoveDeal, automationSettings
+  deal, sponsor, activities, onClose, onUpdateStage, onLogActivity, onUpdateDeal, onUpdateSponsor, onRemoveDeal, automationSettings, senderProfile
 }) => {
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [isGenerating, setIsGenerating] = useState<false | 'EMAIL' | 'IG' | 'LI' | 'X'>(false);
+  const [isGenerating, setIsGenerating] = useState<false | 'EMAIL' | 'IG' | 'LI' | 'X' | 'IQ'>(false);
   const [draftedContent, setDraftedContent] = useState('');
   const [draftPlatform, setDraftPlatform] = useState<'EMAIL' | 'IG' | 'LI' | 'X' | null>(null);
   const [isDeploying, setIsDeploying] = useState(false);
   const [deploymentStatus, setDeploymentStatus] = useState('');
+
+  // Perform IQ State (Synced with local inputs for editing before save)
+  const [emailDraft, setEmailDraft] = useState(deal.emailDraft || '');
+  const [dmDraft, setDmDraft] = useState(deal.dmDraft || '');
+  const [nextFollowUp, setNextFollowUp] = useState(deal.nextFollowUp || '');
+  const [followUpNote, setFollowUpNote] = useState(deal.followUpNote || '');
+
+  // Ensure local state updates if deal prop changes (e.g. from global state update)
+  useEffect(() => {
+    setEmailDraft(deal.emailDraft || '');
+    setDmDraft(deal.dmDraft || '');
+    setNextFollowUp(deal.nextFollowUp || '');
+    setFollowUpNote(deal.followUpNote || '');
+  }, [deal.id, deal.emailDraft, deal.dmDraft, deal.nextFollowUp, deal.followUpNote]);
 
   const handleDeepRefresh = async () => {
     if (!onUpdateSponsor) return;
@@ -44,6 +58,48 @@ const DealDetail: React.FC<DealDetailProps> = ({
     }
   };
 
+  /**
+   * PERFORM IQ: Generate strategic multi-channel drafts
+   */
+  const handleGenerateIQ = async () => {
+    setIsGenerating('IQ');
+    const persona = {
+      teamName: senderProfile.orgName,
+      role: senderProfile.role || "Growth Partner",
+      summary: senderProfile.goal
+    };
+    
+    const drafts = await generateOutreachDrafts(deal, sponsor, persona);
+    
+    setEmailDraft(drafts.emailDraft);
+    setDmDraft(drafts.dmDraft);
+    
+    if (onUpdateDeal) {
+      onUpdateDeal(deal.id, {
+        emailDraft: drafts.emailDraft,
+        dmDraft: drafts.dmDraft
+      });
+    }
+    
+    setIsGenerating(false);
+    onLogActivity(deal.id, 'NOTE', "Perform IQ: Generated structured outreach drafts.");
+  };
+
+  /**
+   * Sync Perform IQ: Commit current local edits to global state
+   */
+  const handleSaveFollowUp = () => {
+    if (onUpdateDeal) {
+      onUpdateDeal(deal.id, {
+        emailDraft,
+        dmDraft,
+        nextFollowUp,
+        followUpNote
+      });
+      onLogActivity(deal.id, 'NOTE', `Updated follow-up plan: ${followUpNote || 'No specific note'}`);
+    }
+  };
+
   const handleGenerate = async (platform: 'EMAIL' | 'IG' | 'LI' | 'X') => {
     setIsGenerating(platform);
     const draft = await generateOutreachDraft(
@@ -51,7 +107,7 @@ const DealDetail: React.FC<DealDetailProps> = ({
       sponsor.companyName,
       sponsor.contactName || 'Valued Partner',
       deal.tier,
-      'Account Manager',
+      senderProfile,
       sponsor.latestSignal
     );
     setDraftedContent(draft);
@@ -65,7 +121,6 @@ const DealDetail: React.FC<DealDetailProps> = ({
     setIsDeploying(true);
     setDeploymentStatus('Simulating Human Keystrokes...');
 
-    // Mimic human interaction delay (AI Safety Protocol)
     await new Promise(resolve => setTimeout(resolve, 1200));
     setDeploymentStatus('Injecting to Clipboard...');
     
@@ -75,7 +130,6 @@ const DealDetail: React.FC<DealDetailProps> = ({
       console.warn("Clipboard access denied.");
     }
 
-    // Ping n8n Webhook if configured
     if (automationSettings?.n8nWebhookUrl && automationSettings.notifyOnDeploy) {
       setDeploymentStatus('Triggering n8n Workflow...');
       try {
@@ -99,7 +153,6 @@ const DealDetail: React.FC<DealDetailProps> = ({
     await new Promise(resolve => setTimeout(resolve, 600));
     setDeploymentStatus('Launching Platform...');
 
-    // Protocol-Specific Routing
     const links = sponsor.socialLinks as any;
     let targetUrl = '';
 
@@ -122,7 +175,6 @@ const DealDetail: React.FC<DealDetailProps> = ({
       }
     }
 
-    // Official Deployment Log
     onLogActivity(deal.id, draftPlatform === 'EMAIL' ? 'EMAIL' : 'DM', `Deployed ${draftPlatform} outreach (Human-Mimic Protocol active).`);
     
     setIsDeploying(false);
@@ -145,7 +197,7 @@ const DealDetail: React.FC<DealDetailProps> = ({
     
     const icons = {
       EMAIL: <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>,
-      IG: <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98-1.281-.059-1.69-.073-4.949-.073zm0 5.838c-3.403 0-6.162 2.759-6.162 6.162s2.759 6.163 6.162 6.163 6.162-2.759 6.162-6.163c0-3.403-2.759-6.162-6.162-6.162zm0 10.162c-2.209 0-4-1.79-4-4 0-2.209 1.791-4 4-4s4 1.791 4 4c0 2.21-1.791 4-4 4zm6.406-11.845c-.796 0-1.441.645-1.441 1.44s.645 1.44 1.441 1.44c.795 0 1.439-.645 1.439-1.44s-.644-1.44-1.439-1.44z"/></svg>,
+      IG: <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98-1.281-.058-1.69-.073-4.949-.073zm0 5.838c-3.403 0-6.162 2.759-6.162 6.162s2.759 6.163 6.162 6.163 6.162-2.759 6.162-6.163c0-3.403-2.759-6.162-6.162-6.162zm0 10.162c-2.209 0-4-1.79-4-4 0-2.209 1.791-4 4-4s4 1.791 4 4c0 2.21-1.791 4-4 4zm6.406-11.845c-.796 0-1.441.645-1.441 1.44s.645 1.44 1.441 1.44c.795 0 1.439-.645 1.439-1.44s-.644-1.44-1.439-1.44z"/></svg>,
       LI: <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M19 0h-14c-2.761 0-5 2.239-5 5v14c0 2.761 2.239 5 5 5h14c2.762 0 5-2.239 5-5v-14c0-2.761-2.238-5-5-5zm-11 19h-3v-11h3v11zm-1.5-12.268c-.966 0-1.75-.79-1.75-1.764s.784-1.764 1.75-1.764 1.75.79 1.75 1.764-.783 1.764-1.75 1.764zm13.5 12.268h-3v-5.604c0-3.368-4-3.113-4 0v5.604h-3v-11h3v1.765c1.396-2.586 7-2.777 7 2.476v6.759z"/></svg>,
       X: <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>
     };
@@ -209,8 +261,119 @@ const DealDetail: React.FC<DealDetailProps> = ({
           </div>
         </header>
 
-        <div className="flex-grow overflow-y-auto p-10 space-y-12 bg-slate-50/20 dark:bg-slate-950/20">
-          {/* Signal Section */}
+        <div className="flex-grow overflow-y-auto p-10 space-y-12 bg-slate-50/20 dark:bg-slate-950/20 custom-scrollbar">
+          {/* Forensic Dossier (Pro Tier) */}
+          {deal.forensicDossier && (
+            <section className="bg-slate-900 dark:bg-black p-8 rounded-[2.5rem] text-white border border-white/5 shadow-2xl relative overflow-hidden group">
+              <div className="absolute top-0 right-0 w-32 h-32 bg-blue-600/10 blur-[40px] pointer-events-none group-hover:bg-blue-600/20 transition-all"></div>
+              <div className="flex justify-between items-center mb-6">
+                <h3 className="text-[10px] font-black text-blue-400 uppercase tracking-[0.3em]">Forensic Dossier (Pro)</h3>
+                <div className="flex flex-col items-end gap-1">
+                  <div className="px-2.5 py-1 bg-blue-600 rounded text-[8px] font-black uppercase tracking-widest">
+                    {deal.forensicDossier.verificationStatus ?? 'UNVERIFIED'}
+                  </div>
+                  {deal.forensicDossier.createdAt && (
+                    <span className="text-[8px] font-black text-slate-500 uppercase tracking-tighter">
+                      Audited {new Date(deal.forensicDossier.createdAt).toLocaleDateString()}
+                    </span>
+                  )}
+                </div>
+              </div>
+              
+              {deal.forensicDossier.verificationReasoning && (
+                <p className="text-base font-bold leading-relaxed mb-8 opacity-95">
+                  {deal.forensicDossier.verificationReasoning}
+                </p>
+              )}
+              
+              {deal.forensicDossier.forensicAuditTrail && deal.forensicDossier.forensicAuditTrail.length > 0 && (
+                <div className="space-y-3 pt-6 border-t border-white/10">
+                  <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-2">Audit Trail</p>
+                  {deal.forensicDossier.forensicAuditTrail.map((step, idx) => (
+                    <div key={idx} className="flex gap-4 text-[10px] font-medium text-slate-400 leading-tight">
+                      <span className="text-blue-500 font-black">•</span>
+                      {step}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
+          )}
+
+          {/* Perform IQ: Outreach & Follow-up Section */}
+          <section className="bg-white dark:bg-slate-800/80 p-8 rounded-[2.5rem] border border-slate-200 dark:border-slate-800 shadow-lg space-y-8 transition-all">
+            <div className="flex justify-between items-center">
+              <div>
+                <h3 className="text-[11px] font-black text-blue-600 dark:text-blue-500 uppercase tracking-[0.3em]">Perform IQ v1</h3>
+                <p className="text-[9px] font-bold text-slate-400 dark:text-slate-500 uppercase mt-1">Strategic Outreach & Triage</p>
+              </div>
+              <button 
+                onClick={handleGenerateIQ} 
+                disabled={isGenerating === 'IQ'}
+                className="px-6 py-2.5 bg-blue-600 text-white rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-blue-700 transition-all flex items-center gap-2 shadow-lg shadow-blue-500/10 active:scale-95 disabled:opacity-50"
+              >
+                {isGenerating === 'IQ' ? (
+                  <svg className="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"/></svg>
+                ) : (
+                  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+                )}
+                Generate IQ Drafts
+              </button>
+            </div>
+
+            <div className="space-y-6">
+              <div className="space-y-2">
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">Email Master Draft</label>
+                <textarea 
+                  value={emailDraft}
+                  onChange={(e) => setEmailDraft(e.target.value)}
+                  placeholder="Draft will appear here..."
+                  className="w-full min-h-[120px] bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl p-4 text-xs font-medium text-slate-700 dark:text-slate-300 outline-none focus:border-blue-500 transition-all"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">Social DM Master Draft</label>
+                <textarea 
+                  value={dmDraft}
+                  onChange={(e) => setDmDraft(e.target.value)}
+                  placeholder="Draft will appear here..."
+                  className="w-full min-h-[80px] bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl p-4 text-xs font-medium text-slate-700 dark:text-slate-300 outline-none focus:border-blue-500 transition-all"
+                />
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">Next Follow-up</label>
+                  <input 
+                    type="date"
+                    value={nextFollowUp}
+                    onChange={(e) => setNextFollowUp(e.target.value)}
+                    className="w-full h-12 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl px-4 text-xs font-bold text-slate-900 dark:text-white outline-none focus:border-blue-500 transition-all"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">Intent Note</label>
+                  <input 
+                    type="text"
+                    value={followUpNote}
+                    onChange={(e) => setFollowUpNote(e.target.value)}
+                    placeholder="e.g. Discuss Q3 partnership"
+                    className="w-full h-12 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl px-4 text-xs font-bold text-slate-900 dark:text-white outline-none focus:border-blue-500 transition-all"
+                  />
+                </div>
+              </div>
+
+              <button 
+                onClick={handleSaveFollowUp}
+                className="w-full py-4 bg-slate-900 dark:bg-slate-700 text-white rounded-2xl text-[10px] font-black uppercase tracking-[0.3em] hover:bg-blue-600 transition-all active:scale-95 shadow-lg"
+              >
+                Sync Perform IQ Plan
+              </button>
+            </div>
+          </section>
+
+          {/* Signal Section (Flash) */}
           <section className="bg-white dark:bg-slate-800/50 p-8 rounded-[2.5rem] border border-slate-100 dark:border-slate-800 shadow-sm transition-colors relative overflow-hidden group">
             <div className="absolute top-0 right-0 w-32 h-32 bg-blue-500/5 blur-[40px] pointer-events-none group-hover:bg-blue-500/10 transition-all"></div>
             <div className="flex justify-between items-center mb-6">
@@ -245,9 +408,8 @@ const DealDetail: React.FC<DealDetailProps> = ({
                   <p className="text-[10px] font-black text-blue-400 uppercase tracking-[0.4em]">AI-Generated {draftPlatform} Proposal</p>
                   <button onClick={() => {
                     navigator.clipboard.writeText(draftedContent);
-                    alert("Draft copied to clipboard.");
                   }} className="text-[8px] font-black uppercase text-slate-500 hover:text-white transition-colors flex items-center gap-1.5">
-                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3"/></svg>
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 00-2 2h2a2 2 0 002-2M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3"/></svg>
                     Copy Manually
                   </button>
                 </div>
@@ -258,12 +420,6 @@ const DealDetail: React.FC<DealDetailProps> = ({
                        <div className="bg-blue-500 h-full animate-[progress_2s_ease-in-out_infinite]" style={{width: '60%'}}></div>
                     </div>
                     <p className="text-xs font-black uppercase tracking-[0.3em] text-blue-400 animate-pulse">{deploymentStatus}</p>
-                    <style>{`
-                      @keyframes progress {
-                        0% { transform: translateX(-100%); }
-                        100% { transform: translateX(200%); }
-                      }
-                    `}</style>
                   </div>
                 ) : (
                   <>
