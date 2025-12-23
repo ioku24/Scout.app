@@ -316,82 +316,11 @@ export const discoverProspects = async (
 
     const mappedLeads = results.map((raw: any) => mapRawLeadToDiscovered(raw as RawDiscoveredLead, groundingLinks));
 
-    // PHASE 2.1: Social Media Scraping Fallback
-    // For leads with websites but missing social links, scrape the HTML as fallback
-    console.log('\n🕷️ Running HTML scraper fallback for social media links...');
+    // STANDARD SCAN: Return immediately (no scraping for speed)
+    // DEEP SCAN: HTML scraping is handled in discoverProspectsDeepScan()
+    console.log(`✅ ${depth} Scan complete: Found ${mappedLeads.length} leads`);
 
-    const scrapingPromises = mappedLeads.map(async (lead) => {
-      // Skip if no website
-      if (!lead.website) return lead;
-
-      // Check if social links are missing
-      const hasSocialLinks = !!(
-        lead.socialLinks?.instagram ||
-        lead.socialLinks?.facebook ||
-        lead.socialLinks?.twitter ||
-        lead.socialLinks?.linkedIn
-      );
-
-      // If we already have social links, skip scraping
-      if (hasSocialLinks) {
-        console.log(`✓ ${lead.companyName}: Already has social links, skipping scrape`);
-        return lead;
-      }
-
-      // Scrape the website for social links
-      console.log(`🕷️ ${lead.companyName}: Scraping ${lead.website} for social links...`);
-      const scrapedLinks = await scrapeSocialLinks(lead.website);
-
-      // Merge scraped links with existing data
-      if (Object.keys(scrapedLinks).length > 0) {
-        const mergedLinks = mergeSocialLinks(lead.socialLinks || {}, scrapedLinks);
-
-        return {
-          ...lead,
-          socialLinks: {
-            instagram: mergedLinks.instagram,
-            linkedIn: mergedLinks.linkedIn,
-            linkedin: mergedLinks.linkedIn, // duplicate key for compatibility
-            facebook: mergedLinks.facebook,
-            twitter: mergedLinks.twitter,
-          },
-          // Add evidence for scraped links
-          instagramField: mergedLinks.instagram ? {
-            value: mergedLinks.instagram,
-            evidence: {
-              source: 'official_website' as DataSource,
-              confidence: 0.85,
-              sourceUrl: `${lead.website} (HTML Scraper)`
-            }
-          } : lead.instagramField,
-          linkedInField: mergedLinks.linkedIn ? {
-            value: mergedLinks.linkedIn,
-            evidence: {
-              source: 'official_website' as DataSource,
-              confidence: 0.85,
-              sourceUrl: `${lead.website} (HTML Scraper)`
-            }
-          } : lead.linkedInField,
-          twitterField: mergedLinks.twitter ? {
-            value: mergedLinks.twitter,
-            evidence: {
-              source: 'official_website' as DataSource,
-              confidence: 0.85,
-              sourceUrl: `${lead.website} (HTML Scraper)`
-            }
-          } : lead.twitterField,
-        };
-      }
-
-      return lead;
-    });
-
-    // Wait for all scraping to complete (in parallel)
-    const enrichedLeads = await Promise.all(scrapingPromises);
-
-    console.log('✅ HTML scraping fallback complete');
-
-    return enrichedLeads;
+    return mappedLeads;
   } catch (error) {
     console.error("Forensic Discovery failure:", error);
     return [];
@@ -884,8 +813,81 @@ export const discoverProspectsDeepScan = async (
     })
   );
 
-  console.log('\n✅ DEEP SCAN COMPLETED');
-  console.log(`📊 Results: ${enrichedLeads.length} leads enriched with Apollo.io data`);
+  // Step 3: HTML Scraping Fallback (for leads still missing social links)
+  console.log('\n🕷️ Step 3: Running HTML scraper fallback for remaining social links...');
 
-  return enrichedLeads;
+  const finalEnrichedLeads = await Promise.all(
+    enrichedLeads.map(async (lead) => {
+      // Skip if no website
+      if (!lead.website) return lead;
+
+      // Check if social links are still missing after Apollo
+      const hasSocialLinks = !!(
+        lead.socialLinks?.instagram ||
+        lead.socialLinks?.facebook ||
+        lead.socialLinks?.twitter ||
+        lead.socialLinks?.linkedIn
+      );
+
+      // If we already have social links, skip scraping
+      if (hasSocialLinks) {
+        console.log(`✓ ${lead.companyName}: Already has social links, skipping HTML scrape`);
+        return lead;
+      }
+
+      // Scrape the website for social links as last resort
+      console.log(`🕷️ ${lead.companyName}: Apollo didn't find social links, trying HTML scraper...`);
+      const scrapedLinks = await scrapeSocialLinks(lead.website);
+
+      // Merge scraped links with existing data
+      if (Object.keys(scrapedLinks).length > 0) {
+        const mergedLinks = mergeSocialLinks(lead.socialLinks || {}, scrapedLinks);
+
+        console.log(`   ✅ HTML scraper found ${Object.keys(scrapedLinks).length} social link(s)`);
+
+        return {
+          ...lead,
+          socialLinks: {
+            instagram: mergedLinks.instagram,
+            linkedIn: mergedLinks.linkedIn,
+            linkedin: mergedLinks.linkedIn,
+            facebook: mergedLinks.facebook,
+            twitter: mergedLinks.twitter,
+          },
+          instagramField: mergedLinks.instagram ? {
+            value: mergedLinks.instagram,
+            evidence: {
+              source: 'official_website' as DataSource,
+              confidence: 0.85,
+              sourceUrl: `${lead.website} (HTML Scraper)`
+            }
+          } : lead.instagramField,
+          linkedInField: mergedLinks.linkedIn ? {
+            value: mergedLinks.linkedIn,
+            evidence: {
+              source: 'official_website' as DataSource,
+              confidence: 0.85,
+              sourceUrl: `${lead.website} (HTML Scraper)`
+            }
+          } : lead.linkedInField,
+          twitterField: mergedLinks.twitter ? {
+            value: mergedLinks.twitter,
+            evidence: {
+              source: 'official_website' as DataSource,
+              confidence: 0.85,
+              sourceUrl: `${lead.website} (HTML Scraper)`
+            }
+          } : lead.twitterField,
+        };
+      }
+
+      console.log(`   ⚠️ HTML scraper found no social links for ${lead.companyName}`);
+      return lead;
+    })
+  );
+
+  console.log('\n✅ DEEP SCAN COMPLETED');
+  console.log(`📊 Results: ${finalEnrichedLeads.length} leads fully enriched`);
+
+  return finalEnrichedLeads;
 };
