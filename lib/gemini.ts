@@ -292,7 +292,7 @@ export const performDeepSignalSearch = async (companyName: string, website: stri
  * Generate structured outreach drafts (import.meta.env.VITE_GEMINI_API_KEY
  */
 export const generateOutreachDrafts = async (deal: Deal, sponsor: Sponsor, persona: { teamName: string, role: string, summary: string }) => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY });
   try {
     const response = await ai.models.generateContent({
       model: 'gemini-3-pro-preview',import.meta.env.VITE_GEMINI_API_KEY
@@ -401,7 +401,7 @@ export const verifyLeadForensically = async (lead: DiscoveredLead) => {
  * Analyze brand voice and social themes to find a specific "hook".
  */
 export const getSocialAngle = async (companyName: string, socialUrl: string) => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY });
   try {
     const response = await ai.models.generateContent({
       model: 'gemini-3-flash-preview',import.meta.env.VITE_GEMINI_API_KEY
