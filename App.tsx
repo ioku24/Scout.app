@@ -319,6 +319,14 @@ const App: React.FC = () => {
     }));
   };
 
+  const handleUpdateDeal = (dealId: string, updates: Partial<Deal>) => {
+    setState(prev => ({
+      ...prev,
+      deals: prev.deals.map(d => d.id === dealId ? { ...d, ...updates } : d)
+    }));
+    showNotification('Follow-up plan saved');
+  };
+
   const handleRemoveDeal = (dealId: string) => {
     setState(prev => {
       const deal = prev.deals.find(d => d.id === dealId);
@@ -530,13 +538,14 @@ const App: React.FC = () => {
       )}
 
       {selectedDeal && selectedSponsor && (
-        <DealDetail 
+        <DealDetail
           deal={selectedDeal}
           sponsor={selectedSponsor}
           activities={dealActivities}
           onClose={() => setSelectedDealId(null)}
           onUpdateStage={handleUpdateStage}
           onLogActivity={handleLogActivity}
+          onUpdateDeal={handleUpdateDeal}
           onUpdateSponsor={handleUpdateSponsor}
           onRemoveDeal={handleRemoveDeal}
           automationSettings={state.automationSettings}
