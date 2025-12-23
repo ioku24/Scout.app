@@ -78,6 +78,7 @@ const App: React.FC = () => {
   const [selectedDealId, setSelectedDealId] = useState<string | null>(null);
   const [isFocusMode, setIsFocusMode] = useState(false);
   const [notification, setNotification] = useState<string | null>(null);
+  const [recentlyAddedDealId, setRecentlyAddedDealId] = useState<string | null>(null);
 
   useEffect(() => {
     const { activeTask, ...persistentState } = state;
@@ -177,17 +178,26 @@ const App: React.FC = () => {
   const handleAddSponsor = (sponsorData: Omit<Sponsor, 'id'>, dealData: Omit<Deal, 'id' | 'sponsorId'>) => {
     const sponsorId = `sp_${Date.now()}`;
     const dealId = `dl_${Date.now()}`;
-    
+
     setState(prev => ({
       ...prev,
       sponsors: [...prev.sponsors, { ...sponsorData, id: sponsorId }],
       deals: [...prev.deals, { ...dealData, id: dealId, sponsorId, currentSequenceStep: 1 }],
       activities: [
-        ...prev.activities, 
+        ...prev.activities,
         { id: `act_${Date.now()}`, dealId, type: 'NOTE', content: 'Lead incorporated', date: new Date().toISOString() }
       ],
     }));
-    showNotification(`${sponsorData.companyName} Added to Board`);
+
+    // AUTO-NAVIGATION: Switch to Pipeline and highlight new deal
+    setRecentlyAddedDealId(dealId);
+    setActiveTab('board');
+    showNotification(`${sponsorData.companyName} added to Pipeline — Opening Board View`);
+
+    // Clear highlight after 5 seconds
+    setTimeout(() => {
+      setRecentlyAddedDealId(null);
+    }, 5000);
   };
 
   const syncForensicDossierFromLead = useCallback((updatedLead: DiscoveredLead) => {
@@ -450,7 +460,13 @@ const App: React.FC = () => {
         )}
 
         {activeTab === 'board' && (
-          <PipelineBoard state={state} onUpdateStage={handleUpdateStage} onSelectDeal={setSelectedDealId} />
+          <PipelineBoard
+            state={state}
+            onUpdateStage={handleUpdateStage}
+            onSelectDeal={setSelectedDealId}
+            highlightDealId={recentlyAddedDealId}
+            onNavigateBack={() => setActiveTab('extract')}
+          />
         )}
 
         {activeTab === 'insights' && (

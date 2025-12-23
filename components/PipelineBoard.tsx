@@ -6,9 +6,11 @@ interface PipelineBoardProps {
   state: AppState;
   onUpdateStage: (dealId: string, newStage: PipelineStage) => void;
   onSelectDeal: (dealId: string) => void;
+  highlightDealId?: string | null;
+  onNavigateBack?: () => void;
 }
 
-const PipelineBoard: React.FC<PipelineBoardProps> = ({ state, onUpdateStage, onSelectDeal }) => {
+const PipelineBoard: React.FC<PipelineBoardProps> = ({ state, onUpdateStage, onSelectDeal, highlightDealId, onNavigateBack }) => {
   const stages = Object.values(PipelineStage);
   
   // Logic: Identify follow-ups due today or overdue
@@ -22,6 +24,24 @@ const PipelineBoard: React.FC<PipelineBoardProps> = ({ state, onUpdateStage, onS
 
   return (
     <div className="space-y-10 animate-fade-in">
+      {/* Breadcrumb Navigation */}
+      {onNavigateBack && (
+        <div className="mb-6 flex items-center gap-3">
+          <button
+            onClick={onNavigateBack}
+            className="flex items-center gap-2 px-4 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-[10px] font-black uppercase text-slate-600 dark:text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 hover:border-blue-400 transition-all shadow-sm"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 19l-7-7 7-7"/>
+            </svg>
+            Back to Discovery
+          </button>
+          <span className="text-[9px] font-black text-slate-300 dark:text-slate-700 uppercase tracking-widest">
+            → Pipeline Board
+          </span>
+        </div>
+      )}
+
       {/* Triage Section: Follow-ups Today */}
       <section className="bg-white dark:bg-slate-900 rounded-[2.5rem] border border-slate-200 dark:border-slate-800 p-8 shadow-sm transition-colors">
         <h3 className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-[0.4em] mb-6 pl-2">Follow-ups Today</h3>
@@ -96,13 +116,23 @@ const PipelineBoard: React.FC<PipelineBoardProps> = ({ state, onUpdateStage, onS
                   const isDueToday = deal.nextFollowUp && deal.nextFollowUp <= today;
                   
                   return (
-                    <div 
-                      key={deal.id} 
+                    <div
+                      key={deal.id}
                       onClick={() => onSelectDeal(deal.id)}
-                      className={`bg-white dark:bg-slate-900 p-6 rounded-xl border shadow-sm transition-all cursor-pointer group/card ${
+                      className={`relative bg-white dark:bg-slate-900 p-6 rounded-xl border shadow-sm transition-all cursor-pointer group/card ${
                         isDueToday ? 'border-blue-600/40' : 'border-slate-200 dark:border-slate-800'
+                      } ${
+                        highlightDealId === deal.id
+                          ? 'ring-4 ring-blue-500 ring-opacity-50 animate-pulse border-blue-600 shadow-2xl shadow-blue-500/30'
+                          : ''
                       } hover:border-blue-600/60 dark:hover:border-blue-500/60 hover:shadow-xl hover:shadow-slate-900/5 dark:hover:shadow-black/20 hover:-translate-y-1`}
                     >
+                      {/* "Just Added" badge */}
+                      {highlightDealId === deal.id && (
+                        <div className="absolute -top-2 -right-2 px-3 py-1 bg-blue-600 text-white rounded-full text-[8px] font-black uppercase tracking-widest shadow-lg animate-bounce">
+                          Just Added
+                        </div>
+                      )}
                       <div className="flex justify-between items-start mb-3">
                         <span className="text-[9px] font-black uppercase tracking-[0.2em] text-slate-400 dark:text-slate-500 group-hover/card:text-blue-600 dark:group-hover/card:text-blue-500 transition-colors">{deal.tier}</span>
                         <span className="text-sm font-black text-slate-900 dark:text-white">${deal.amount.toLocaleString()}</span>
