@@ -399,34 +399,58 @@ export const discoverProspects = async (
 };
 
 /**
- * ESCALATION PROTOCOL: Forensic Audit using Gemini 3 Pro
+ * ESCALATION PROTOCOL: Forensic Audit using Gemini 3 Pro + HTML Scraping
  * Performs deep reasoning to disambiguate and verify lead data.
+ *
+ * PHASE 2.1 UPDATE: Now integrates direct HTML scraping to ensure
+ * social media links are actually verified from the website footer.
  */
 export const verifyLeadForensically = async (lead: DiscoveredLead) => {
   const ai = getAI();
   const model = 'gemini-3-pro-preview';
 
+  console.log(`\n🔍 FORENSIC VERIFICATION: ${lead.companyName}`);
+
+  // STEP 1: Run HTML scraper first to get ground truth from website footer
+  let scrapedSocialLinks: any = {};
+  if (lead.website) {
+    console.log('   Step 1: Running HTML scraper for ground truth...');
+    scrapedSocialLinks = await scrapeSocialLinks(lead.website);
+
+    if (Object.keys(scrapedSocialLinks).length > 0) {
+      console.log(`   ✅ HTML Scraper found ${Object.keys(scrapedSocialLinks).length} social link(s)`);
+    } else {
+      console.log('   ⚠️ HTML Scraper found no social links in footer');
+    }
+  }
+
+  // STEP 2: Run Gemini verification for business logic validation
+  console.log('   Step 2: Running Gemini Pro verification...');
+
   const prompt = `FORENSIC_AUDIT_PROTOCOL: Verify the following business entity for a high-value partnership.
   ENTITY: ${lead.companyName}
   WEBSITE: ${lead.website}
   LOCATION: ${lead.address || 'Unknown'}
-  SOCIAL_HANDLES: ${JSON.stringify(lead.socialLinks)}
+  CLAIMED_SOCIAL_HANDLES: ${JSON.stringify(lead.socialLinks)}
+  ACTUAL_SCRAPED_HANDLES: ${JSON.stringify(scrapedSocialLinks)}
 
   TASKS:
   1. DISAMBIGUATION: Ensure this is not a collision with another company of similar name. Check if it's a specific franchise location vs corporate headquarters.
-  2. DATA_INTEGRITY: Cross-reference the website footer and contact pages for verified emails and social handles.
+  2. DATA_INTEGRITY: The ACTUAL_SCRAPED_HANDLES were directly extracted from the website HTML footer. Use these as ground truth. If CLAIMED_SOCIAL_HANDLES differ from ACTUAL_SCRAPED_HANDLES, the scraped data is correct.
   3. RISK_ASSESSMENT: Detect if the website is down, parked, or significantly outdated.
   4. ALIGNMENT: Does this entity truly match the sponsorship intent: "${lead.description}"?
+
+  IMPORTANT: Trust ACTUAL_SCRAPED_HANDLES over CLAIMED_SOCIAL_HANDLES since they came directly from the website HTML.
 
   RETURN JSON:
   {
     "status": "VERIFIED | FAILED | COLLISION_DETECTED",
-    "reasoning": "string (Forensic verdict on sponsorship potential)",
-    "auditTrail": ["string (step by step verification notes)"],
+    "reasoning": "string (Forensic verdict on sponsorship potential and data accuracy)",
+    "auditTrail": ["string (step by step verification notes, mention if scraped data corrected claimed data)"],
     "correctedData": {
       "website": "string?",
       "email": "string?",
-      "socialLinks": { "instagram": "string?", "linkedIn": "string?" }
+      "socialLinks": { "instagram": "string?", "linkedIn": "string?", "facebook": "string?", "twitter": "string?" }
     }
   }`;
 
@@ -440,10 +464,28 @@ export const verifyLeadForensically = async (lead: DiscoveredLead) => {
       }
     });
 
-    const result = extractJson(response.text || '{}');
-    return result;
+    const geminiResult = extractJson(response.text || '{}');
+
+    // STEP 3: Merge scraped data with Gemini corrections
+    if (geminiResult && geminiResult.correctedData) {
+      // Prioritize scraped social links (ground truth from HTML)
+      geminiResult.correctedData.socialLinks = mergeSocialLinks(
+        geminiResult.correctedData.socialLinks || {},
+        scrapedSocialLinks
+      );
+
+      console.log('   ✅ Verification complete');
+      console.log(`   Status: ${geminiResult.status}`);
+      console.log(`   Reasoning: ${geminiResult.reasoning?.substring(0, 100)}...`);
+
+      if (Object.keys(scrapedSocialLinks).length > 0) {
+        console.log('   📊 Social links verified via HTML scraping');
+      }
+    }
+
+    return geminiResult;
   } catch (error) {
-    console.error("Forensic Audit failure:", error);
+    console.error("   ❌ Forensic Audit failure:", error);
     return null;
   }
 };
