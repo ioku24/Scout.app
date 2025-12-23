@@ -821,22 +821,9 @@ export const discoverProspectsDeepScan = async (
       // Skip if no website
       if (!lead.website) return lead;
 
-      // Check if social links are still missing after Apollo
-      const hasSocialLinks = !!(
-        lead.socialLinks?.instagram ||
-        lead.socialLinks?.facebook ||
-        lead.socialLinks?.twitter ||
-        lead.socialLinks?.linkedIn
-      );
-
-      // If we already have social links, skip scraping
-      if (hasSocialLinks) {
-        console.log(`✓ ${lead.companyName}: Already has social links, skipping HTML scrape`);
-        return lead;
-      }
-
-      // Scrape the website for social links as last resort
-      console.log(`🕷️ ${lead.companyName}: Apollo didn't find social links, trying HTML scraper...`);
+      // Always run scraper to fill in missing social links
+      // The mergeSocialLinks() function won't overwrite existing data
+      console.log(`🕷️ ${lead.companyName}: Running HTML scraper to fill in missing social links...`);
       const scrapedLinks = await scrapeSocialLinks(lead.website);
 
       // Merge scraped links with existing data

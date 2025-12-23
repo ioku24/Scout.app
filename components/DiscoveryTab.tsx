@@ -45,7 +45,7 @@ const DiscoveryTab: React.FC<DiscoveryTabProps> = ({
   // Guided Builder State
   const [builder, setBuilder] = useState({
     industry: 'Sporting goods brands',
-    size: '2-10',
+    size: '11-50',
     intent: 'Seeking sponsorships',
     channels: {
       instagram: false,
@@ -94,10 +94,10 @@ const DiscoveryTab: React.FC<DiscoveryTabProps> = ({
     const channelsCsvOrAny = selectedChannels.length > 0 ? selectedChannels.join(', ') : 'Any available';
     const loc = location || 'your target city';
     const rad = radius || '25';
-    const sizeDescriptor = builder.size === 'Solo' ? 'solo-operators' : `businesses with ${builder.size} employees`;
-    
+    const sizeDescriptor = builder.size === 'Any Size' ? 'of any company size' : `businesses with ${builder.size} employees`;
+
     const dnaString = `Find ${builder.industry} that are ${sizeDescriptor} within ${rad} miles of ${loc}. Prioritize prospects showing: ${builder.intent}. Required Data: Website, Email, Phone Number, and Social Media handles (${channelsCsvOrAny}). Optimize for partnership fit and responsiveness. Return only public, verified, and forensic information extracted from official sources.`;
-    
+
     setDnaPreview(dnaString);
   };
 
@@ -267,17 +267,17 @@ const DiscoveryTab: React.FC<DiscoveryTabProps> = ({
               </div>
               <div className="space-y-1.5">
                 <label className="text-[9px] font-black uppercase text-slate-500 tracking-widest pl-1">Company Size</label>
-                <select 
+                <select
                   value={builder.size}
                   onChange={e => setBuilder({...builder, size: e.target.value})}
                   className="w-full h-11 bg-white dark:bg-slate-800 border border-blue-100 dark:border-blue-800 rounded-xl px-4 text-xs font-bold outline-none shadow-sm transition-colors"
                 >
-                  <option>Solo</option>
-                  <option>2-10</option>
+                  <option>Any Size</option>
+                  <option>1-10</option>
                   <option>11-50</option>
                   <option>51-200</option>
-                  <option>201-1000</option>
-                  <option>1000+</option>
+                  <option>201-500</option>
+                  <option>500+</option>
                 </select>
               </div>
               <div className="space-y-1.5">
