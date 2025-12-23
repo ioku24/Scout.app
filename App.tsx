@@ -8,7 +8,7 @@ import SponsorForm from './components/SponsorForm.tsx';
 import DealDetail from './components/DealDetail.tsx';
 import WorkflowBuilder from './components/WorkflowBuilder.tsx';
 import SocialInbox from './components/SocialInbox.tsx';
-import { discoverProspects, getIdentityKeys } from './lib/gemini.ts';
+import { discoverProspects, discoverProspectsDeepScan, getIdentityKeys } from './lib/gemini.ts';
 
 const STORAGE_KEY = 'scout_crm_v4_final_auto_v5';
 const CURRENT_STATE_VERSION = 1;
@@ -116,20 +116,34 @@ const App: React.FC = () => {
   }, [state.sponsors, state.vault]);
 
   const startDiscoveryAgent = useCallback(async (description: string, location: string, radius: string, depth: 'STANDARD' | 'DEEP', coords?: {latitude: number, longitude: number}) => {
-    setState(prev => ({ 
-      ...prev, 
-      activeTask: { status: 'SEARCHING', phase: 'Initializing Agent...', query: description, location } 
+    setState(prev => ({
+      ...prev,
+      activeTask: {
+        status: 'SEARCHING',
+        phase: depth === 'DEEP' ? 'Deep Scan: Initializing Gemini + Apollo.io...' : 'Initializing Agent...',
+        query: description,
+        location
+      }
     }));
 
     try {
-      const results = await discoverProspects(
-        description, 
-        location, 
-        { whoWeAre: state.senderProfile.orgName, role: state.senderProfile.role || 'Agent', targetGoal: state.senderProfile.goal },
-        radius, 
-        depth,
-        coords
-      );
+      // Choose between Standard Scan (Gemini only) or Deep Scan (Gemini + Apollo)
+      const results = depth === 'DEEP'
+        ? await discoverProspectsDeepScan(
+            description,
+            location,
+            { whoWeAre: state.senderProfile.orgName, role: state.senderProfile.role || 'Agent', targetGoal: state.senderProfile.goal },
+            radius,
+            coords
+          )
+        : await discoverProspects(
+            description,
+            location,
+            { whoWeAre: state.senderProfile.orgName, role: state.senderProfile.role || 'Agent', targetGoal: state.senderProfile.goal },
+            radius,
+            depth,
+            coords
+          );
       
       const leadsWithIds = results.map((r: any) => ({
         ...r,

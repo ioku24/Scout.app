@@ -1,16 +1,17 @@
 
 import { GoogleGenAI, Type } from "@google/genai";
-import { 
-  SenderProfile, 
-  DataSource, 
-  ContactField, 
-  FieldEvidence, 
-  DiscoveredLead, 
+import {
+  SenderProfile,
+  DataSource,
+  ContactField,
+  FieldEvidence,
+  DiscoveredLead,
   GroundingLink,
   ContactIntelligence,
   ContactMethodType,
   Deal
 } from "../types.ts";
+import { fullEnrichment, isApolloConfigured } from "./apollo";
 
 /**
  * Internal type representing the high-fidelity raw JSON structure from the model.
@@ -529,4 +530,242 @@ export const getSocialAngle = async (companyName: string, socialUrl: string) => 
     });
     return extractJson(response.text || '{}');
   } catch (error) { return {}; }
+};
+
+/**
+ * PHASE 2: Deep Scan Discovery with Apollo.io Enrichment
+ *
+ * Performs a two-stage enrichment process:
+ * 1. Uses Gemini to discover prospects based on DNA profile and location
+ * 2. Enriches each lead with Apollo.io company data and decision maker contacts
+ *
+ * Falls back gracefully to Standard Scan if Apollo API key is not configured.
+ */
+export const discoverProspectsDeepScan = async (
+  description: string,
+  location: string,
+  context: { whoWeAre: string, role: string, targetGoal: string },
+  radius: string = '25',
+  userCoords?: { latitude: number; longitude: number }
+): Promise<DiscoveredLead[]> => {
+  console.log('\n🚀 DEEP SCAN MODE INITIATED');
+  console.log(`📍 Location: ${location} (${radius} miles)`);
+  console.log(`🎯 DNA Profile: ${description.substring(0, 100)}...`);
+
+  // Check Apollo configuration
+  if (!isApolloConfigured()) {
+    console.warn('⚠️ Apollo API key not configured. Falling back to Standard Scan.');
+    console.warn('💡 To enable Deep Scan, add APOLLO_API_KEY to your .env file');
+    return discoverProspects(description, location, context, radius, 'STANDARD', userCoords);
+  }
+
+  console.log('✅ Apollo API configured - proceeding with Deep Scan');
+
+  // Step 1: Run Gemini discovery (using DEEP mode for more results)
+  console.log('\n🔍 Step 1: Running Gemini Discovery...');
+  const geminiLeads = await discoverProspects(
+    description,
+    location,
+    context,
+    radius,
+    'DEEP', // Use DEEP mode to get up to 20 leads
+    userCoords
+  );
+
+  console.log(`✅ Gemini discovered ${geminiLeads.length} prospects`);
+
+  if (geminiLeads.length === 0) {
+    console.warn('⚠️ No leads found by Gemini. Returning empty array.');
+    return [];
+  }
+
+  // Step 2: Enrich each lead with Apollo data
+  console.log(`\n💎 Step 2: Enriching ${geminiLeads.length} leads with Apollo.io...`);
+
+  const enrichedLeads = await Promise.all(
+    geminiLeads.map(async (lead, index) => {
+      // Skip enrichment if no website
+      if (!lead.website || lead.website.trim() === '') {
+        console.warn(`⚠️ Lead ${index + 1}/${geminiLeads.length}: ${lead.companyName} - No website, skipping Apollo enrichment`);
+        return lead;
+      }
+
+      try {
+        console.log(`🔍 Enriching ${index + 1}/${geminiLeads.length}: ${lead.companyName} (${lead.website})`);
+
+        // Call Apollo full enrichment (company + contacts)
+        const apolloResult = await fullEnrichment(lead.website);
+
+        if (!apolloResult.success) {
+          console.warn(`⚠️ Apollo enrichment failed for ${lead.companyName}: ${apolloResult.error}`);
+          return lead; // Return original lead if enrichment fails
+        }
+
+        // Merge Apollo data into the lead
+        const enrichedLead: DiscoveredLead = { ...lead };
+
+        // Merge organization data
+        if (apolloResult.organization) {
+          const org = apolloResult.organization;
+
+          // Update phone if Apollo has it and lead doesn't
+          if (org.phone && !enrichedLead.phone) {
+            enrichedLead.phone = org.phone;
+            enrichedLead.phoneField = {
+              value: org.phone,
+              evidence: {
+                source: 'directory' as DataSource,
+                confidence: 0.9,
+                sourceUrl: 'Apollo.io Organization Enrichment'
+              }
+            };
+          }
+
+          // Update address if Apollo has it
+          if (org.street_address && !enrichedLead.address) {
+            const fullAddress = [
+              org.street_address,
+              org.city,
+              org.state,
+              org.postal_code,
+              org.country
+            ].filter(Boolean).join(', ');
+
+            enrichedLead.address = fullAddress;
+            enrichedLead.addressField = {
+              value: fullAddress,
+              evidence: {
+                source: 'directory' as DataSource,
+                confidence: 0.9,
+                sourceUrl: 'Apollo.io Organization Enrichment'
+              }
+            };
+          }
+
+          // Merge social links
+          if (org.linkedin_url && !enrichedLead.socialLinks?.linkedIn) {
+            enrichedLead.socialLinks = {
+              ...enrichedLead.socialLinks,
+              linkedIn: org.linkedin_url,
+              linkedin: org.linkedin_url
+            };
+            enrichedLead.linkedInField = {
+              value: org.linkedin_url,
+              evidence: {
+                source: 'directory' as DataSource,
+                confidence: 0.9,
+                sourceUrl: 'Apollo.io Organization Enrichment'
+              }
+            };
+          }
+
+          if (org.twitter_url && !enrichedLead.socialLinks?.twitter) {
+            enrichedLead.socialLinks = {
+              ...enrichedLead.socialLinks,
+              twitter: org.twitter_url
+            };
+            enrichedLead.twitterField = {
+              value: org.twitter_url,
+              evidence: {
+                source: 'directory' as DataSource,
+                confidence: 0.9,
+                sourceUrl: 'Apollo.io Organization Enrichment'
+              }
+            };
+          }
+
+          if (org.facebook_url && !enrichedLead.socialLinks?.facebook) {
+            enrichedLead.socialLinks = {
+              ...enrichedLead.socialLinks,
+              facebook: org.facebook_url
+            };
+          }
+
+          // Enhance description with Apollo data
+          if (org.short_description) {
+            enrichedLead.description = `${enrichedLead.description}\n\nCompany Info: ${org.short_description}`;
+          }
+        }
+
+        // Merge decision maker contacts
+        if (apolloResult.people && apolloResult.people.length > 0) {
+          const enrichedContacts: ContactIntelligence[] = [];
+
+          apolloResult.people.forEach((person, personIndex) => {
+            // Add email contact
+            if (person.email) {
+              enrichedContacts.push({
+                id: `apollo-email-${personIndex}`,
+                type: 'EMAIL',
+                value: person.email,
+                confidence: person.email_status === 'verified' ? 0.95 : 0.75,
+                source: `Apollo.io - ${person.title || 'Contact'}`,
+                isPrimary: personIndex === 0,
+                lastVerified: new Date().toISOString()
+              });
+
+              // Set primary email if lead doesn't have one
+              if (personIndex === 0 && !enrichedLead.email) {
+                enrichedLead.email = person.email;
+                enrichedLead.emailField = {
+                  value: person.email,
+                  evidence: {
+                    source: 'directory' as DataSource,
+                    confidence: person.email_status === 'verified' ? 0.95 : 0.75,
+                    sourceUrl: 'Apollo.io People Search'
+                  }
+                };
+              }
+            }
+
+            // Add phone contacts
+            if (person.phone_numbers && person.phone_numbers.length > 0) {
+              person.phone_numbers.forEach((phoneObj, phoneIndex) => {
+                if (phoneObj.sanitized_number) {
+                  enrichedContacts.push({
+                    id: `apollo-phone-${personIndex}-${phoneIndex}`,
+                    type: 'PHONE',
+                    value: phoneObj.sanitized_number,
+                    confidence: 0.8,
+                    source: `Apollo.io - ${person.title || 'Contact'}`,
+                    isPrimary: personIndex === 0 && phoneIndex === 0
+                  });
+                }
+              });
+            }
+
+            // Add LinkedIn contact
+            if (person.linkedin_url) {
+              enrichedContacts.push({
+                id: `apollo-linkedin-${personIndex}`,
+                type: 'LINKEDIN',
+                value: person.linkedin_url,
+                confidence: 0.9,
+                source: `Apollo.io - ${person.title || 'Contact'}`,
+                isPrimary: personIndex === 0
+              });
+            }
+          });
+
+          // Merge with existing enriched contacts
+          enrichedLead.enrichedContacts = [
+            ...(enrichedLead.enrichedContacts || []),
+            ...enrichedContacts
+          ];
+
+          console.log(`✅ Added ${enrichedContacts.length} contact points for ${lead.companyName}`);
+        }
+
+        return enrichedLead;
+      } catch (error) {
+        console.error(`❌ Error enriching ${lead.companyName}:`, error);
+        return lead; // Return original lead on error
+      }
+    })
+  );
+
+  console.log('\n✅ DEEP SCAN COMPLETED');
+  console.log(`📊 Results: ${enrichedLeads.length} leads enriched with Apollo.io data`);
+
+  return enrichedLeads;
 };
