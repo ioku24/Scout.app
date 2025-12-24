@@ -19,8 +19,7 @@ const APOLLO_BASE_URL = 'https://api.apollo.io/api/v1';
  * Get the Apollo API key from environment variables
  */
 function getApolloApiKey(): string | undefined {
-  // Vite uses import.meta.env for environment variables
-  return import.meta.env.VITE_APOLLO_API_KEY || process.env.APOLLO_API_KEY;
+  return import.meta.env.VITE_APOLLO_API_KEY;
 }
 
 /**
