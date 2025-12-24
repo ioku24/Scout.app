@@ -184,6 +184,7 @@ export interface Deal {
   followUpNote?: string; // Triage intent note
   emailDraft?: string;   // Generated email copy
   dmDraft?: string;      // Generated social DM copy
+  valueProp?: string;    // Customized value proposition
 }
 
 export interface AgentTask {
@@ -258,4 +259,72 @@ export interface SocialMessage {
   isArchived: boolean;
   suggestedAction: string;
   sourceUrl?: string;
+}
+
+// Apollo.io API Types
+export interface ApolloOrganization {
+  id: string;
+  name: string;
+  domain?: string;
+  website_url?: string;
+  phone?: string;
+  street_address?: string;
+  city?: string;
+  state?: string;
+  postal_code?: string;
+  country?: string;
+  linkedin_url?: string;
+  twitter_url?: string;
+  facebook_url?: string;
+  short_description?: string;
+  industry?: string;
+  keywords?: string[];
+  estimated_num_employees?: number;
+  founded_year?: number;
+}
+
+export interface ApolloPerson {
+  id: string;
+  first_name: string;
+  last_name: string;
+  name: string;
+  title?: string;
+  email?: string;
+  email_status?: 'verified' | 'unverified' | 'likely' | 'unlikely';
+  phone_numbers?: Array<{
+    raw_number: string;
+    sanitized_number: string;
+    type: string;
+  }>;
+  linkedin_url?: string;
+  organization_id?: string;
+  organization_name?: string;
+  employment_history?: Array<{
+    title: string;
+    organization_name: string;
+    start_date?: string;
+    end_date?: string;
+    current: boolean;
+  }>;
+}
+
+export interface ApolloEnrichmentResult {
+  organization?: ApolloOrganization;
+  people?: ApolloPerson[];
+  success: boolean;
+  error?: string;
+  creditsUsed?: number;
+}
+
+export interface ApolloApiResponse<T> {
+  organization?: T;
+  organizations?: T[];
+  person?: T;
+  people?: T[];
+  pagination?: {
+    page: number;
+    per_page: number;
+    total_entries: number;
+    total_pages: number;
+  };
 }

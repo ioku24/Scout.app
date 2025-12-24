@@ -21,7 +21,7 @@ const DealDetail: React.FC<DealDetailProps> = ({
   deal, sponsor, activities, onClose, onUpdateStage, onLogActivity, onUpdateDeal, onUpdateSponsor, onRemoveDeal, automationSettings, senderProfile
 }) => {
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [isGenerating, setIsGenerating] = useState<false | 'EMAIL' | 'IG' | 'LI' | 'X' | 'IQ'>(false);
+  const [isGenerating, setIsGenerating] = useState<false | 'EMAIL' | 'IG' | 'LI' | 'X' | 'IQ' | 'VALUE_PROP'>(false);
   const [draftedContent, setDraftedContent] = useState('');
   const [draftPlatform, setDraftPlatform] = useState<'EMAIL' | 'IG' | 'LI' | 'X' | null>(null);
   const [isDeploying, setIsDeploying] = useState(false);
@@ -32,6 +32,7 @@ const DealDetail: React.FC<DealDetailProps> = ({
   const [dmDraft, setDmDraft] = useState(deal.dmDraft || '');
   const [nextFollowUp, setNextFollowUp] = useState(deal.nextFollowUp || '');
   const [followUpNote, setFollowUpNote] = useState(deal.followUpNote || '');
+  const [valueProp, setValueProp] = useState(deal.valueProp || '');
 
   // Ensure local state updates if deal prop changes (e.g. from global state update)
   useEffect(() => {
@@ -39,7 +40,8 @@ const DealDetail: React.FC<DealDetailProps> = ({
     setDmDraft(deal.dmDraft || '');
     setNextFollowUp(deal.nextFollowUp || '');
     setFollowUpNote(deal.followUpNote || '');
-  }, [deal.id, deal.emailDraft, deal.dmDraft, deal.nextFollowUp, deal.followUpNote]);
+    setValueProp(deal.valueProp || '');
+  }, [deal.id, deal.emailDraft, deal.dmDraft, deal.nextFollowUp, deal.followUpNote, deal.valueProp]);
 
   const handleDeepRefresh = async () => {
     if (!onUpdateSponsor) return;
@@ -86,6 +88,29 @@ const DealDetail: React.FC<DealDetailProps> = ({
   };
 
   /**
+   * Generate customized value proposition for this specific prospect
+   */
+  const handleGenerateValueProp = async () => {
+    setIsGenerating('VALUE_PROP');
+
+    // Import the function dynamically
+    const { generateValueProposition } = await import('../lib/gemini');
+
+    const generatedValueProp = await generateValueProposition(deal, sponsor, senderProfile);
+
+    setValueProp(generatedValueProp);
+
+    if (onUpdateDeal) {
+      onUpdateDeal(deal.id, {
+        valueProp: generatedValueProp
+      });
+    }
+
+    setIsGenerating(false);
+    onLogActivity(deal.id, 'NOTE', "Generated customized value proposition");
+  };
+
+  /**
    * Sync Perform IQ: Commit current local edits to global state
    */
   const handleSaveFollowUp = () => {
@@ -94,7 +119,8 @@ const DealDetail: React.FC<DealDetailProps> = ({
         emailDraft,
         dmDraft,
         nextFollowUp,
-        followUpNote
+        followUpNote,
+        valueProp
       });
       onLogActivity(deal.id, 'NOTE', `Updated follow-up plan: ${followUpNote || 'No specific note'}`);
     }
@@ -300,6 +326,68 @@ const DealDetail: React.FC<DealDetailProps> = ({
             </section>
           )}
 
+          {/* Apollo Decision Makers */}
+          {sponsor.enrichedContacts && sponsor.enrichedContacts.filter(c => c.source.includes('Apollo.io')).length > 0 && (
+            <section className="bg-white dark:bg-slate-800/80 p-8 rounded-[2.5rem] border border-slate-200 dark:border-slate-800 shadow-lg space-y-6 transition-all">
+              <div className="flex justify-between items-center">
+                <div>
+                  <h3 className="text-[11px] font-black text-purple-600 dark:text-purple-500 uppercase tracking-[0.3em]">Decision Makers</h3>
+                  <p className="text-[9px] font-bold text-slate-400 dark:text-slate-500 uppercase mt-1">Apollo.io Enrichment</p>
+                </div>
+                <div className="px-3 py-1.5 bg-purple-100 dark:bg-purple-900/20 rounded-lg">
+                  <span className="text-[8px] font-black text-purple-600 dark:text-purple-400 uppercase tracking-widest">
+                    {sponsor.enrichedContacts.filter(c => c.source.includes('Apollo.io')).length} Contacts
+                  </span>
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                {sponsor.enrichedContacts
+                  .filter(c => c.source.includes('Apollo.io'))
+                  .slice(0, 5)
+                  .map(contact => (
+                    <div key={contact.id} className="p-4 bg-slate-50 dark:bg-slate-900/50 rounded-xl border border-slate-200 dark:border-slate-700">
+                      <div className="flex justify-between items-start mb-2">
+                        <div className="flex items-center gap-2">
+                          <span className={`text-[8px] font-black uppercase tracking-widest px-2 py-1 rounded ${
+                            contact.type === 'EMAIL' ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400' :
+                            contact.type === 'PHONE' ? 'bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400' :
+                            contact.type === 'LINKEDIN' ? 'bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400' :
+                            'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400'
+                          }`}>
+                            {contact.type}
+                          </span>
+                          {contact.isPrimary && (
+                            <span className="text-[8px] font-black uppercase tracking-widest px-2 py-1 rounded bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400">
+                              Primary
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          <div className={`w-2 h-2 rounded-full ${
+                            contact.confidence > 0.9 ? 'bg-green-500' :
+                            contact.confidence > 0.7 ? 'bg-yellow-500' :
+                            'bg-orange-500'
+                          }`}></div>
+                          <span className="text-[8px] font-bold text-slate-400 dark:text-slate-500">
+                            {Math.round(contact.confidence * 100)}% confident
+                          </span>
+                        </div>
+                      </div>
+
+                      <p className="text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                        {contact.value}
+                      </p>
+
+                      <p className="text-[9px] font-medium text-slate-400 dark:text-slate-500">
+                        {contact.source}
+                      </p>
+                    </div>
+                  ))}
+              </div>
+            </section>
+          )}
+
           {/* Perform IQ: Outreach & Follow-up Section */}
           <section className="bg-white dark:bg-slate-800/80 p-8 rounded-[2.5rem] border border-slate-200 dark:border-slate-800 shadow-lg space-y-8 transition-all">
             <div className="flex justify-between items-center">
@@ -371,6 +459,63 @@ const DealDetail: React.FC<DealDetailProps> = ({
                 Sync Perform IQ Plan
               </button>
             </div>
+          </section>
+
+          {/* Value Proposition Generator */}
+          <section className="bg-gradient-to-br from-purple-50 to-indigo-50 dark:from-purple-950/20 dark:to-indigo-950/20 p-8 rounded-[2.5rem] border border-purple-200 dark:border-purple-800/50 shadow-lg space-y-6 transition-all relative overflow-hidden">
+            <div className="absolute top-0 right-0 w-32 h-32 bg-purple-500/10 blur-[40px] pointer-events-none"></div>
+
+            <div className="flex justify-between items-center">
+              <div>
+                <h3 className="text-[11px] font-black text-purple-600 dark:text-purple-400 uppercase tracking-[0.3em]">Value Proposition</h3>
+                <p className="text-[9px] font-bold text-purple-400 dark:text-purple-500 uppercase mt-1">Customized for {sponsor.companyName}</p>
+              </div>
+              <button
+                onClick={handleGenerateValueProp}
+                disabled={isGenerating === 'VALUE_PROP'}
+                className="px-6 py-2.5 bg-purple-600 text-white rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-purple-700 transition-all flex items-center gap-2 shadow-lg shadow-purple-500/10 active:scale-95 disabled:opacity-50"
+              >
+                {isGenerating === 'VALUE_PROP' ? (
+                  <>
+                    <svg className="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"/></svg>
+                    Generating...
+                  </>
+                ) : (
+                  <>
+                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/></svg>
+                    Generate Value Prop
+                  </>
+                )}
+              </button>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-[10px] font-black text-purple-500 dark:text-purple-400 uppercase tracking-widest pl-1">
+                Why This Partnership Matters
+              </label>
+              <textarea
+                value={valueProp}
+                onChange={(e) => {
+                  setValueProp(e.target.value);
+                  if (onUpdateDeal) {
+                    onUpdateDeal(deal.id, { valueProp: e.target.value });
+                  }
+                }}
+                placeholder="Click 'Generate Value Prop' to create a customized value proposition for this prospect..."
+                className="w-full min-h-[100px] bg-white dark:bg-slate-900/50 border-2 border-purple-200 dark:border-purple-800 rounded-2xl p-4 text-sm font-medium text-slate-700 dark:text-slate-300 outline-none focus:border-purple-500 transition-all"
+              />
+            </div>
+
+            {valueProp && (
+              <div className="p-4 bg-white/50 dark:bg-slate-900/30 rounded-xl border border-purple-200 dark:border-purple-700">
+                <p className="text-[9px] font-black text-purple-400 uppercase tracking-widest mb-2">
+                  💡 Pro Tip
+                </p>
+                <p className="text-[10px] font-medium text-slate-600 dark:text-slate-400 leading-relaxed">
+                  Use this value prop in your outreach to make your pitch more relevant to {sponsor.companyName}'s specific context.
+                </p>
+              </div>
+            )}
           </section>
 
           {/* Signal Section (Flash) */}

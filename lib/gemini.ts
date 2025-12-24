@@ -544,6 +544,82 @@ Return STRICT JSON with exactly two string fields:
   }
 }
 
+/**
+ * VALUE PROP GENERATOR: Create customized value proposition for a specific prospect
+ *
+ * Uses prospect context (industry, signals, location, tier) + sender's base value prop
+ * to generate a 2-3 sentence customized value proposition.
+ */
+export async function generateValueProposition(
+  deal: { tier: string; forensicDossier?: { verificationReasoning?: string } },
+  sponsor: { companyName: string; website?: string; industry?: string; address?: string; latestSignal?: string },
+  senderProfile: { orgName: string; role?: string; goal: string; offerOneLiner: string }
+): Promise<string> {
+  const ai = getAI();
+
+  const prompt = `
+VALUE_PROPOSITION_GENERATOR
+
+You are creating a customized value proposition for a sponsorship proposal.
+
+SENDER CONTEXT (Your Organization)
+- Organization: ${senderProfile.orgName}
+- Role: ${senderProfile.role || 'Partnership Manager'}
+- Mission: ${senderProfile.goal}
+- Base Value Prop: "${senderProfile.offerOneLiner}"
+
+PROSPECT CONTEXT (Target Company)
+- Company: ${sponsor.companyName}
+- Website: ${sponsor.website || 'N/A'}
+- Industry: ${sponsor.industry || 'Unknown'}
+- Location: ${sponsor.address || 'Unknown'}
+- Sponsorship Tier: ${deal.tier}
+- Latest Signal: ${sponsor.latestSignal || 'Community growth or brand expansion'}
+- Forensic Reasoning: ${deal.forensicDossier?.verificationReasoning || 'Strong alignment for sponsorship partnership'}
+
+TASK
+Create a customized value proposition specifically for ${sponsor.companyName}.
+
+REQUIREMENTS:
+1. 2-3 sentences maximum
+2. Start with the base value prop: "${senderProfile.offerOneLiner}"
+3. Customize it by referencing:
+   - Their industry context
+   - Their latest signal (recent news/activity)
+   - Their location (local community angle)
+   - The sponsorship tier they're being offered
+4. Make it outcome-focused (what they GET, not what you offer)
+5. Be specific to ${sponsor.companyName}, not generic
+
+STYLE:
+- Professional and direct
+- Focus on tangible benefits (brand exposure, audience reach, community impact)
+- Avoid marketing clichés
+- Sound like a confident partnership proposal
+
+OUTPUT FORMAT:
+Return ONLY the value proposition text (2-3 sentences). No JSON, no markdown, no extra formatting.
+`;
+
+  try {
+    const response = await ai.models.generateContent({
+      model: 'gemini-3-pro-preview',
+      contents: [{ parts: [{ text: prompt }] }],
+      config: {
+        tools: [{ googleSearch: {} }], // Allow web search for context
+      }
+    });
+
+    const valueProp = response.text?.trim() || "Failed to generate value proposition.";
+
+    // Clean up any markdown or extra formatting
+    return valueProp.replace(/^["']|["']$/g, '').trim();
+  } catch (error) {
+    console.error("Value Prop Generation failure:", error);
+    return "Failed to generate value proposition.";
+  }
+}
+
 export const interceptPublicSignal = async (query: string, platform: 'INSTAGRAM' | 'LINKEDIN') => {
   const ai = getAI();
   const prompt = `ANALYZE_SIGNAL: "${query}" on ${platform} for sponsorship opportunities. JSON: {senderName, senderHandle, content, identityMatch, suggestedAction}.`;

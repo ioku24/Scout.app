@@ -119,24 +119,38 @@ const App: React.FC = () => {
   }, [state.sponsors, state.vault]);
 
   const startDiscoveryAgent = useCallback(async (description: string, location: string, radius: string, depth: 'STANDARD' | 'DEEP', coords?: {latitude: number, longitude: number}) => {
-    setState(prev => ({ 
-      ...prev, 
-      activeTask: { status: 'SEARCHING', phase: 'Initializing Agent...', query: description, location } 
+    setState(prev => ({
+      ...prev,
+      activeTask: { status: 'SEARCHING', phase: 'Initializing Agent...', query: description, location }
     }));
 
     try {
-      const results = await discoverProspects(
-        description, 
-        location, 
-        { whoWeAre: state.senderProfile.orgName, role: state.senderProfile.role || 'Agent', targetGoal: state.senderProfile.goal },
-        radius, 
-        depth,
-        coords
-      );
-      
+      let results;
+
+      // Use Deep Scan with Apollo enrichment if depth is DEEP
+      if (depth === 'DEEP') {
+        const { discoverProspectsDeepScan } = await import('./lib/gemini');
+        results = await discoverProspectsDeepScan(
+          description,
+          location,
+          { whoWeAre: state.senderProfile.orgName, role: state.senderProfile.role || 'Agent', targetGoal: state.senderProfile.goal },
+          radius,
+          coords
+        );
+      } else {
+        results = await discoverProspects(
+          description,
+          location,
+          { whoWeAre: state.senderProfile.orgName, role: state.senderProfile.role || 'Agent', targetGoal: state.senderProfile.goal },
+          radius,
+          depth,
+          coords
+        );
+      }
+
       const leadsWithIds = results.map((r: any) => ({
         ...r,
-        id: `prospect_${Math.random().toString(36).substr(2, 9)}`
+        id: r.id || `prospect_${Math.random().toString(36).substr(2, 9)}`
       }));
 
       const newSession: DiscoverySession = {
@@ -155,8 +169,8 @@ const App: React.FC = () => {
         discoveryHistory: [newSession, ...prev.discoveryHistory].slice(0, 15),
         activeTask: { status: 'COMPLETED', phase: 'Extraction Complete' }
       }));
-      
-      showNotification(`Agent found ${leadsWithIds.length} leads.`);
+
+      showNotification(`Agent found ${leadsWithIds.length} leads.${depth === 'DEEP' ? ' (Apollo enriched)' : ''}`);
     } catch (error) {
       console.error(error);
       setState(prev => ({ ...prev, activeTask: { status: 'ERROR', phase: 'Agent encountered an error' } }));
