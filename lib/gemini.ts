@@ -229,7 +229,7 @@ export const discoverProspects = async (
   depth: 'STANDARD' | 'DEEP' = 'STANDARD',
   userCoords?: { latitude: number; longitude: number }
 ) => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY });
   // Rule: Maps grounding is only supported in Gemini 2.5 series models.
   const model = 'gemini-2.5-flash-preview';
   const leadLimit = depth === 'DEEP' ? 10 : 5;
