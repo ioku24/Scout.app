@@ -30,6 +30,21 @@ export interface SenderProfile {
   goal: string;
   offerOneLiner: string;
   ctaStyle: 'quick_chat' | 'email_reply' | 'book_call';
+
+  // Company website intelligence
+  companyWebsite?: string;           // Website URL
+  companyIntel?: CompanyIntelligence; // Extracted intelligence
+  intelLastUpdated?: string;          // ISO timestamp of last analysis
+}
+
+export interface CompanyIntelligence {
+  mission: string;                 // Core mission/about summary
+  targetAudience: string;          // Who they serve (demographics, interests)
+  keyDifferentiators: string[];    // Unique selling points
+  brandVoice: string;              // Tone/style (professional, casual, energetic, etc.)
+  recentNews: string;              // Latest achievements or news
+  coreOfferings: string[];         // Main products/services
+  fullSummary: string;             // Comprehensive AI-generated summary
 }
 
 /** 

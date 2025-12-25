@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { DiscoveredLead, DiscoverySession, AgentTask, Persona } from '../types';
+import { DiscoveredLead, DiscoverySession, AgentTask, Persona, SenderProfile } from '../types';
 import { getIdentityKeys, verifyLeadForensically } from '../lib/gemini';
 
 interface DiscoveryTabProps {
@@ -17,13 +17,15 @@ interface DiscoveryTabProps {
   onSavePersona: (persona: Omit<Persona, 'id'>) => void;
   onRemovePersona: (id: string) => void;
   onShowNotification?: (msg: string) => void;
+  senderProfile: SenderProfile;
+  onUpdateSenderProfile: (updates: Partial<SenderProfile>) => void;
 }
 
-const DiscoveryTab: React.FC<DiscoveryTabProps> = ({ 
-  currentLeads, 
-  onUpdateLeads, 
-  onAddAsLead, 
-  onSaveToVault, 
+const DiscoveryTab: React.FC<DiscoveryTabProps> = ({
+  currentLeads,
+  onUpdateLeads,
+  onAddAsLead,
+  onSaveToVault,
   onStartSearch,
   activeTask,
   history,
@@ -33,7 +35,9 @@ const DiscoveryTab: React.FC<DiscoveryTabProps> = ({
   personas,
   onSavePersona,
   onRemovePersona,
-  onShowNotification
+  onShowNotification,
+  senderProfile,
+  onUpdateSenderProfile
 }) => {
   const [description, setDescription] = useState(activeTask.query || '');
   const [location, setLocation] = useState(activeTask.location || '');
@@ -45,6 +49,8 @@ const DiscoveryTab: React.FC<DiscoveryTabProps> = ({
   const [userCoords, setUserCoords] = useState<{latitude: number, longitude: number} | null>(null);
   const [selectedProspect, setSelectedProspect] = useState<DiscoveredLead | null>(null);
   const [personaName, setPersonaName] = useState('');
+  const [isAnalyzingWebsite, setIsAnalyzingWebsite] = useState(false);
+  const [websiteUrl, setWebsiteUrl] = useState(senderProfile.companyWebsite || '');
 
   const [builder, setBuilder] = useState({
     industry: 'Sporting goods brands',
@@ -130,6 +136,45 @@ const DiscoveryTab: React.FC<DiscoveryTabProps> = ({
       channels: p.channels
     });
     onShowNotification?.(`Loaded Persona: ${p.name}`);
+  };
+
+  const handleAnalyzeWebsite = async () => {
+    if (!websiteUrl || websiteUrl.trim() === '') {
+      if (onShowNotification) {
+        onShowNotification('Please enter a valid website URL');
+      }
+      return;
+    }
+
+    setIsAnalyzingWebsite(true);
+
+    try {
+      const { analyzeCompanyWebsite } = await import('../lib/gemini');
+      const intel = await analyzeCompanyWebsite(websiteUrl);
+
+      if (intel) {
+        onUpdateSenderProfile({
+          companyWebsite: websiteUrl,
+          companyIntel: intel,
+          intelLastUpdated: new Date().toISOString()
+        });
+
+        if (onShowNotification) {
+          onShowNotification('✅ Company intelligence extracted successfully!');
+        }
+      } else {
+        if (onShowNotification) {
+          onShowNotification('Failed to analyze website. Please try again.');
+        }
+      }
+    } catch (error) {
+      console.error('Website analysis error:', error);
+      if (onShowNotification) {
+        onShowNotification('Error analyzing website');
+      }
+    } finally {
+      setIsAnalyzingWebsite(false);
+    }
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -218,6 +263,84 @@ const DiscoveryTab: React.FC<DiscoveryTabProps> = ({
               </button>
             )}
           </div>
+        </div>
+
+        {/* Company Website Intelligence */}
+        <div className="mb-10 p-6 bg-gradient-to-br from-purple-50 to-indigo-50 dark:from-purple-950/20 dark:to-indigo-950/20 rounded-[2rem] border border-purple-200 dark:border-purple-800/50 space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-[11px] font-black text-purple-600 dark:text-purple-400 uppercase tracking-[0.3em]">Your Organization</h3>
+              <p className="text-[9px] font-bold text-purple-400 dark:text-purple-500 uppercase mt-1">
+                {senderProfile.companyIntel ? 'Intelligence Active' : 'Add Website for Personalized AI'}
+              </p>
+            </div>
+            {senderProfile.companyIntel && (
+              <div className="px-3 py-1.5 bg-purple-100 dark:bg-purple-900/30 rounded-lg">
+                <span className="text-[8px] font-black text-purple-600 dark:text-purple-400 uppercase tracking-widest">
+                  ✓ Analyzed
+                </span>
+              </div>
+            )}
+          </div>
+
+          <div className="flex gap-3">
+            <input
+              type="url"
+              value={websiteUrl}
+              onChange={(e) => setWebsiteUrl(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !isAnalyzingWebsite) {
+                  handleAnalyzeWebsite();
+                }
+              }}
+              placeholder="Enter your company website (e.g., myteam.com)"
+              className="flex-1 h-12 bg-white dark:bg-slate-900/50 border-2 border-purple-200 dark:border-purple-800 rounded-xl px-4 text-sm font-medium text-slate-700 dark:text-slate-300 outline-none focus:border-purple-500 transition-all"
+            />
+            <button
+              onClick={handleAnalyzeWebsite}
+              disabled={isAnalyzingWebsite || !websiteUrl.trim()}
+              className="px-6 py-3 bg-purple-600 text-white rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-purple-700 transition-all flex items-center gap-2 shadow-lg shadow-purple-500/10 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {isAnalyzingWebsite ? (
+                <>
+                  <svg className="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"/>
+                  </svg>
+                  Analyzing...
+                </>
+              ) : (
+                <>
+                  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+                  </svg>
+                  Analyze Website
+                </>
+              )}
+            </button>
+          </div>
+
+          {/* Show Intelligence Summary */}
+          {senderProfile.companyIntel && (
+            <div className="p-4 bg-white/60 dark:bg-slate-900/40 rounded-xl border border-purple-200 dark:border-purple-700 space-y-2">
+              <p className="text-[9px] font-black text-purple-400 uppercase tracking-widest mb-2">
+                🧠 Company Intelligence
+              </p>
+              <p className="text-xs font-medium text-slate-600 dark:text-slate-400 leading-relaxed">
+                {senderProfile.companyIntel.fullSummary}
+              </p>
+              <div className="flex flex-wrap gap-2 mt-3">
+                <span className="px-2 py-1 bg-purple-100 dark:bg-purple-900/30 rounded text-[8px] font-bold text-purple-600 dark:text-purple-400">
+                  {senderProfile.companyIntel.brandVoice}
+                </span>
+                {senderProfile.companyIntel.keyDifferentiators.slice(0, 2).map((diff, i) => (
+                  <span key={i} className="px-2 py-1 bg-indigo-100 dark:bg-indigo-900/30 rounded text-[8px] font-bold text-indigo-600 dark:text-indigo-400">
+                    {diff}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Saved Personas Row */}

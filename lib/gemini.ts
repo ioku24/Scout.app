@@ -9,7 +9,8 @@ import {
   GroundingLink,
   ContactIntelligence,
   ContactMethodType,
-  Deal
+  Deal,
+  CompanyIntelligence
 } from "../types.ts";
 import { fullEnrichment, isApolloConfigured } from "./apollo";
 import { scrapeSocialLinks, mergeSocialLinks } from "./scraper";
@@ -476,10 +477,21 @@ export const generateOutreachDraft = async (
 export async function generateOutreachDrafts(
   deal: Deal,
   company: { companyName: string; website?: string; contactName?: string; latestSignal?: string },
-  persona: { teamName: string; role: string; summary: string }
+  persona: { teamName: string; role: string; summary: string; companyIntel?: CompanyIntelligence }
 ): Promise<{ emailDraft: string; dmDraft: string }> {
   const ai = getAI();
-  
+
+  // Enhanced prompt with company intelligence
+  const companyContext = persona.companyIntel
+    ? `
+- Mission: ${persona.companyIntel.mission}
+- Target Audience: ${persona.companyIntel.targetAudience}
+- Brand Voice: ${persona.companyIntel.brandVoice}
+- Key Differentiators: ${persona.companyIntel.keyDifferentiators.join(', ')}
+- Recent News: ${persona.companyIntel.recentNews}
+`
+    : '';
+
   const prompt = `
 PERFORM_IQ_OUTREACH_ENGINE
 
@@ -488,7 +500,7 @@ You are writing sponsorship outreach for a sports team.
 SENDER (TEAM CONTEXT)
 - Team/Org: ${persona.teamName}
 - Sender Role: ${persona.role}
-- Mission/Summary: ${persona.summary}
+- Mission/Summary: ${persona.summary}${companyContext}
 
 RECIPIENT (PROSPECT CONTEXT)
 - Company: ${company.companyName}
@@ -501,13 +513,15 @@ TASK
 1) Write ONE concise cold email:
    - Include a clear Subject line regarding partnership.
    - Max 200 words.
-   - Make the value for the company explicit (brand exposure, audience engagement, CSR impact).
-   - Do NOT use clichés like "Hope this email finds you well".
+   - ${persona.companyIntel ? 'Use the team context above (mission, audience, differentiators) to make it highly personalized and authentic' : 'Make the value for the company explicit (brand exposure, audience engagement, CSR impact)'}
+   - ${persona.companyIntel ? 'Match the brand voice: ' + persona.companyIntel.brandVoice : 'Do NOT use clichés like "Hope this email finds you well"'}
+   - ${persona.companyIntel ? 'Reference actual target audience or recent team news' : 'Be professional and direct'}
 
 2) Write ONE concise social DM:
    - Max 80 words.
    - Suitable for LinkedIn or Instagram DM.
-   - Friendly, direct, and easy to reply to regarding a sponsorship opportunity.
+   - ${persona.companyIntel ? 'Match the brand voice and reference team differentiators' : 'Friendly, direct, and easy to reply to regarding a sponsorship opportunity'}
+   - ${persona.companyIntel ? 'Sound authentic to the team brand' : 'Easy to reply to'}
 
 FORMAT
 Return STRICT JSON with exactly two string fields:
@@ -553,9 +567,24 @@ Return STRICT JSON with exactly two string fields:
 export async function generateValueProposition(
   deal: { tier: string; forensicDossier?: { verificationReasoning?: string } },
   sponsor: { companyName: string; website?: string; industry?: string; address?: string; latestSignal?: string },
-  senderProfile: { orgName: string; role?: string; goal: string; offerOneLiner: string }
+  senderProfile: { orgName: string; role?: string; goal: string; offerOneLiner: string; companyIntel?: CompanyIntelligence }
 ): Promise<string> {
   const ai = getAI();
+
+  // Enhanced prompt with company intelligence
+  const companyContext = senderProfile.companyIntel
+    ? `
+
+DEEP COMPANY CONTEXT (Use this for highly personalized messaging):
+- Mission: ${senderProfile.companyIntel.mission}
+- Target Audience: ${senderProfile.companyIntel.targetAudience}
+- Brand Voice: ${senderProfile.companyIntel.brandVoice}
+- Key Differentiators: ${senderProfile.companyIntel.keyDifferentiators.join(', ')}
+- Core Offerings: ${senderProfile.companyIntel.coreOfferings.join(', ')}
+- Recent News: ${senderProfile.companyIntel.recentNews}
+- Full Summary: ${senderProfile.companyIntel.fullSummary}
+`
+    : '';
 
   const prompt = `
 VALUE_PROPOSITION_GENERATOR
@@ -566,7 +595,7 @@ SENDER CONTEXT (Your Organization)
 - Organization: ${senderProfile.orgName}
 - Role: ${senderProfile.role || 'Partnership Manager'}
 - Mission: ${senderProfile.goal}
-- Base Value Prop: "${senderProfile.offerOneLiner}"
+- Base Value Prop: "${senderProfile.offerOneLiner}"${companyContext}
 
 PROSPECT CONTEXT (Target Company)
 - Company: ${sponsor.companyName}
@@ -578,24 +607,21 @@ PROSPECT CONTEXT (Target Company)
 - Forensic Reasoning: ${deal.forensicDossier?.verificationReasoning || 'Strong alignment for sponsorship partnership'}
 
 TASK
-Create a customized value proposition specifically for ${sponsor.companyName}.
+Create a highly personalized value proposition for ${sponsor.companyName}${senderProfile.companyIntel ? ' that uses the deep company context above' : ''}.
 
 REQUIREMENTS:
 1. 2-3 sentences maximum
-2. Start with the base value prop: "${senderProfile.offerOneLiner}"
-3. Customize it by referencing:
-   - Their industry context
-   - Their latest signal (recent news/activity)
-   - Their location (local community angle)
-   - The sponsorship tier they're being offered
-4. Make it outcome-focused (what they GET, not what you offer)
-5. Be specific to ${sponsor.companyName}, not generic
+2. ${senderProfile.companyIntel ? 'Use the company intelligence to make it HIGHLY SPECIFIC to your organization' : 'Start with the base value prop: "' + senderProfile.offerOneLiner + '"'}
+3. ${senderProfile.companyIntel ? 'Reference your actual target audience, mission, or differentiators' : 'Customize by referencing their industry, signals, location'}
+4. ${senderProfile.companyIntel ? 'Match your brand voice (' + senderProfile.companyIntel.brandVoice + ')' : 'Make it outcome-focused (what they GET, not what you offer)'}
+5. ${senderProfile.companyIntel ? 'Make it outcome-focused for ' + sponsor.companyName : 'Be specific to ' + sponsor.companyName + ', not generic'}
+6. Sound authentic and knowledgeable about your own organization
 
 STYLE:
-- Professional and direct
+- ${senderProfile.companyIntel ? 'Use the brand voice: ' + senderProfile.companyIntel.brandVoice : 'Professional and direct'}
 - Focus on tangible benefits (brand exposure, audience reach, community impact)
-- Avoid marketing clichés
-- Sound like a confident partnership proposal
+- ${senderProfile.companyIntel ? 'Be specific and credible' : 'Avoid marketing clichés'}
+- ${senderProfile.companyIntel ? 'Avoid generic sponsorship language' : 'Sound like a confident partnership proposal'}
 
 OUTPUT FORMAT:
 Return ONLY the value proposition text (2-3 sentences). No JSON, no markdown, no extra formatting.
@@ -617,6 +643,109 @@ Return ONLY the value proposition text (2-3 sentences). No JSON, no markdown, no
   } catch (error) {
     console.error("Value Prop Generation failure:", error);
     return "Failed to generate value proposition.";
+  }
+}
+
+/**
+ * COMPANY WEBSITE ANALYZER: Extract comprehensive intelligence from organization's website
+ *
+ * Uses web scraping + Gemini Pro to deeply understand the company for personalized AI generation
+ */
+export async function analyzeCompanyWebsite(websiteUrl: string): Promise<CompanyIntelligence | null> {
+  const ai = getAI();
+
+  try {
+    // Normalize URL
+    let url = websiteUrl.trim();
+    if (!url.startsWith('http')) {
+      url = `https://${url}`;
+    }
+
+    console.log(`🔍 Analyzing company website: ${url}`);
+
+    // Fetch website HTML
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; ScoutBot/1.0)' },
+      signal: AbortSignal.timeout(10000),
+    });
+
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+    const html = await response.text();
+
+    // Extract text content from HTML (strip tags, keep meaningful text)
+    const textContent = html
+      .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+      .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, '')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 10000); // Limit to 10k chars for Gemini analysis
+
+    // Use Gemini to analyze the website content
+    const prompt = `
+COMPANY WEBSITE INTELLIGENCE ANALYZER
+
+You are analyzing a company's website to deeply understand their brand, mission, and value proposition for use in personalized sponsorship outreach.
+
+WEBSITE URL: ${url}
+
+WEBSITE CONTENT:
+${textContent}
+
+TASK:
+Extract comprehensive intelligence about this organization to help personalize sponsorship pitches and messaging.
+
+EXTRACT THE FOLLOWING (be thorough and specific):
+
+1. **Mission Statement**: What is their core purpose? What do they stand for? (1-2 sentences)
+
+2. **Target Audience**: Who do they serve? Include demographics, interests, values, community type (be specific - don't say "general audience")
+
+3. **Key Differentiators**: What makes them unique? List 3-5 specific competitive advantages or unique assets
+
+4. **Brand Voice**: How do they communicate? (e.g., professional & corporate, casual & friendly, energetic & motivational, community-focused, technical & data-driven)
+
+5. **Recent News/Achievements**: Any recent wins, milestones, expansions, or announcements mentioned on the site
+
+6. **Core Offerings**: What are their main products, services, or programs? List 3-5 key offerings
+
+7. **Full Summary**: A comprehensive 3-4 sentence summary capturing the essence of this organization for use in AI-generated content
+
+OUTPUT FORMAT:
+Return valid JSON with this structure:
+{
+  "mission": "string",
+  "targetAudience": "string",
+  "keyDifferentiators": ["string", "string", ...],
+  "brandVoice": "string",
+  "recentNews": "string",
+  "coreOfferings": ["string", "string", ...],
+  "fullSummary": "string"
+}
+
+Be specific and extract real details from the website content. Avoid generic statements.
+`;
+
+    const aiResponse = await ai.models.generateContent({
+      model: 'gemini-3-pro-preview',
+      contents: [{ parts: [{ text: prompt }] }],
+      config: {
+        responseMimeType: "application/json",
+        tools: [{ googleSearch: {} }] // Allow web search for recent news
+      }
+    });
+
+    const jsonText = aiResponse.text?.trim() || '{}';
+    const intel = JSON.parse(jsonText) as CompanyIntelligence;
+
+    console.log('✅ Company Intel Analysis Complete:', intel);
+
+    return intel;
+  } catch (error) {
+    console.error('❌ Company website analysis failed:', error);
+    return null;
   }
 }
 

@@ -455,6 +455,11 @@ const App: React.FC = () => {
             onSavePersona={handleAddPersona}
             onRemovePersona={handleRemovePersona}
             onShowNotification={showNotification}
+            senderProfile={state.senderProfile}
+            onUpdateSenderProfile={(updates) => setState(prev => ({
+              ...prev,
+              senderProfile: { ...prev.senderProfile, ...updates }
+            }))}
           />
         )}
 

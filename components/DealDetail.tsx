@@ -68,7 +68,8 @@ const DealDetail: React.FC<DealDetailProps> = ({
     const persona = {
       teamName: senderProfile.orgName,
       role: senderProfile.role || "Growth Partner",
-      summary: senderProfile.goal
+      summary: senderProfile.goal,
+      companyIntel: senderProfile.companyIntel
     };
     
     const drafts = await generateOutreachDrafts(deal, sponsor, persona);
